@@ -1,4 +1,3 @@
-
 use core::fmt;
 use std::error::Error;
 use std::{cell::RefCell, vec};
@@ -8,6 +7,8 @@ use mlua::{
     Function, Lua,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+mod ui;
 
 
 #[derive(Debug, Clone)]
@@ -310,7 +311,6 @@ impl LogicGate for Circuit {
                 return Err(CantCompileGate);
             }
             let outputs = self.get_outputs();
-            println!("Outputs from {:?} : {:?}", self.get_inputs(), outputs);
             table.add(inputs, outputs);
         }
 
