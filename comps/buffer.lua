@@ -3,10 +3,10 @@ NUM_OF_OUTS = 1
 MEMORY_SIZE = 1
 
 WIDTH = 2
-HEIGHT = 1
+HEIGHT = 2
 
-INPUT_POSITIONS = {1}
-OUTPUT_POSITIONS = {1}
+INPUT_POSITIONS = {7}
+OUTPUT_POSITIONS = {3}
 
 function Calculate(inputs)
     local result = memory[1]

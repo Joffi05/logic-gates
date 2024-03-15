@@ -1,7 +1,7 @@
-use egui_sdl2_gl::egui::{self as egui, widgets, Sense};
-use crate::{new_and, ui::drawable_gate::DrawableGate, LogicGate};
+use egui_sdl2_gl::egui::{self as egui};
+use crate::{ui::drawable_gate::DrawableGate};
 
-use super::{drawable_gate, gate_list::GhostGate};
+use super::{gate_list::GhostGate};
 
 const MAX_ZOOM: f32 = 20.0;
 const MIN_ZOOM: f32 = 0.3;
@@ -102,6 +102,8 @@ impl Canvas {
                                 //that includes not reading at all because not present 
                                 // and wrong len of inputs_pos in comparison to num_ins
                                 //and wrong len of outputs_pos in comparison to num_outs
+                                // auch checken ob die inputs und outputs pos in den richtigen grenzen liegen
+                                // auch checken ob inputs und outputs gleihce einträge haben
                                 let width_o = g.files.read_props().unwrap().width;
                                 let height_o = g.files.read_props().unwrap().height;
                                 let width;

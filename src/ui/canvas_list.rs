@@ -1,5 +1,5 @@
 use egui_sdl2_gl::egui as egui;
-use serde_json::map::Iter;
+
 use crate::ui::canvas::Canvas;
 
 pub struct SelectableCanvas {

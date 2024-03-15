@@ -52,7 +52,7 @@ fn main() {
 
     let start_time = Instant::now();
 
-    let mut state = ui::State::new();
+    let mut state = crate::ui::state::State::new();
 
     'running: loop {
         window

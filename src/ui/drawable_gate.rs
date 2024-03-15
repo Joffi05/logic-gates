@@ -1,17 +1,17 @@
 
-use std::{any::Any, error::Error, fmt::format, hash::Hash, path::Path, sync::Arc};
-use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, ColorImage, Painter, Pos2, Rect, Rounding, Stroke, TextureHandle, TextureId, TextureOptions}, painter};
-use mlua::{Function, Lua, UserData, UserDataMethods, UserDataRef, UserDataRefMut};
+use std::{error::Error, hash::Hash, path::Path};
+use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, Rect, TextureHandle, TextureOptions}};
+use mlua::{Function, Lua, UserData, UserDataMethods};
 use crate::LogicGate;
 use super::{canvas::GRID_SPACING, gate_list::GhostGate};
 use uuid::Uuid;
 
 // Describes a position on the border of a gate as number, where an input should go
 #[derive(Clone, Debug)]
-struct InOutPosition(u16);
+pub struct InOutPosition(u16);
 
 impl InOutPosition {
-    fn new(pos: u16) -> Self {
+    pub fn new(pos: u16) -> Self {
         Self(pos)
     }
 
@@ -77,9 +77,6 @@ impl GateFiles {
         .iter()
         .map(|&pos| InOutPosition::new(pos))
         .collect();
-
-        println!("{:?}", inputs_pos);
-        println!("{:?}", outputs_pos);
 
         Ok(GateProps {
             num_ins: globals.get::<_, u8>("NUM_OF_INS")?,
@@ -155,6 +152,8 @@ pub struct DrawableGate {
     pos: (f32, f32),
     size: (f32, f32),
     visual: VisualBuffer,
+    inputs_pos: Vec<InOutPosition>,
+    outputs_pos: Vec<InOutPosition>,
     pub files: GateFiles,
     pub selected: bool,
     pub drag: (f32, f32),
@@ -175,7 +174,7 @@ impl PartialEq for DrawableGate {
 }
 
 impl DrawableGate {
-    pub fn new(ctx: &egui::Context,gate: Box<dyn LogicGate>, pos: (f32, f32), size: (f32, f32)) -> Self {
+    pub fn new(ctx: &egui::Context,gate: Box<dyn LogicGate>, pos: (f32, f32), size: (f32, f32), inputs_pos: Vec<InOutPosition>, outputs_pos: Vec<InOutPosition>) -> Self {
         let lua = Path::new("comps").join(gate.get_name().to_ascii_lowercase() + ".lua");
         let json = Path::new("comps").join(gate.get_name().to_ascii_lowercase() + ".json");
 
@@ -208,6 +207,8 @@ impl DrawableGate {
             pos,
             size,
             visual,
+            inputs_pos,
+            outputs_pos,
             files,
             selected: false,
             drag: (0.0, 0.0),
@@ -242,6 +243,8 @@ impl DrawableGate {
             size,
             visual,
             files: gate.files,
+            inputs_pos: gate.inputs_pos,
+            outputs_pos: gate.outputs_pos,
             selected: false,
             drag: (0.0, 0.0),
             orientation: Orientation::Right,
@@ -275,7 +278,7 @@ impl DrawableGate {
         }
     }
 
-    fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, ctx: &egui::Context) {
+    fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, _ctx: &egui::Context) {
         // Update texture if Buffer changed
         if self.visual.changed {
             self.visual.make_texture();
@@ -326,5 +329,19 @@ impl DrawableGate {
             self.call_lua_update_buffer(&lua).unwrap();
         }
         self.draw_texture(painter, gate_rect, ctx);
+
+        // Draw inputs
+        for input_pos in &self.inputs_pos {
+            let (x, y) = input_pos.calc_coord_of_center(gate_rect);
+            let center = egui::pos2(x, y) + pan_offset; // Adjust the center based on pan_offset
+            painter.circle_filled(center, 5.0 * zoom_level, egui::Color32::DARK_GREEN); // Adjust circle size and color as needed
+        }
+
+        // Draw outputs
+        for output_pos in &self.outputs_pos {
+            let (x, y) = output_pos.calc_coord_of_center(gate_rect);
+            let center = egui::pos2(x, y) + pan_offset; // Adjust the center based on pan_offset
+            painter.circle_filled(center, 5.0 * zoom_level, egui::Color32::DARK_RED); // Adjust circle size and color as needed
+        }
     }    
 }

@@ -1,11 +1,11 @@
-use std::borrow::Borrow;
+
 
 use egui_sdl2_gl::egui as egui;
 use crate::ui::gate_list;
 use crate::ui::top_menu;
 
 use super::canvas_list::CanvasList;
-use super::drawable_gate::DrawableGate;
+
 use super::gate_list::GateList;
 
 pub struct State {

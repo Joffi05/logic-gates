@@ -5,8 +5,8 @@ MEMORY_SIZE = 0
 HEIGHT = 2
 WIDTH = 3
 
-INPUT_POSITIONS = {1, 3}
-OUTPUT_POSITIONS = {2}
+INPUT_POSITIONS = {8, 10}
+OUTPUT_POSITIONS = {4}
 
 function Calculate(inputs)
     local result = true

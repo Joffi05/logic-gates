@@ -3,15 +3,18 @@ use egui_sdl2_gl::egui::{self as egui, pos2};
 
 use crate::BasicGate;
 use crate::LogicGate;
-use crate::LuaCode;
+
 
 use super::drawable_gate::GateFiles;
+use super::drawable_gate::InOutPosition;
 use std::fs;
 use std::path::Path;
 
 pub struct GhostGate {
     pub gate: Box<dyn LogicGate>,
     pub files: GateFiles,
+    pub inputs_pos: Vec<InOutPosition>,
+    pub outputs_pos: Vec<InOutPosition>,
 }
 
 impl PartialEq for GhostGate {
@@ -25,6 +28,8 @@ impl Clone for GhostGate {
         Self {
             gate: Box::new(BasicGate::from_lua(self.gate.get_name(), self.files.lua.clone()).unwrap()),
             files: self.files.clone(),
+            inputs_pos: self.inputs_pos.clone(),
+            outputs_pos: self.outputs_pos.clone(),
         }
     }
 }
@@ -55,7 +60,7 @@ impl GateList {
         self.open
     }
 
-    pub fn update(&mut self, ctx: &egui::Context) {
+    pub fn update(&mut self, _ctx: &egui::Context) {
         // Read the gates from ./comps
         let comps_dir = "./comps";
         if let Ok(entries) = fs::read_dir(comps_dir) {
@@ -79,12 +84,19 @@ impl GateList {
                                 };
                             }
 
+                            // Hier auch prop reading abchecken
+                            // props müssen zentral gespeichert werden.
+                            let props = gate_file.read_props().unwrap();
+                            let ins = props.inputs_pos;
+                            let outs = props.outputs_pos;
+
                             let gate_name = file_name.split(".").next().unwrap().to_ascii_uppercase();
 
                             let gate = GhostGate {
                                     gate: Box::new(BasicGate::from_lua(gate_name, gate_file.lua.clone()).unwrap()),
                                     files: gate_file,
-                                
+                                    inputs_pos: ins,
+                                    outputs_pos: outs,
                             };
 
                             // Add if not already in
