@@ -78,7 +78,7 @@ impl State {
         // Panel for displaying the mouse location
         // Display the mouse location as a floating label
         egui::Area::new("mouse_location")
-            .fixed_pos(ctx.available_rect().right_top() - egui::vec2(110.0, 0.0)) // Adjust these values to position the label
+            .fixed_pos(ctx.available_rect().right_top() - egui::vec2(120.0, 0.0)) // Adjust these values to position the label
             .show(ctx, |ui| {
                 if let Some(pointer_pos) = ctx.input(|i| i.pointer.hover_pos()) {
                     let (pan_x_dif, pan_y_dif) = self.canvas_list.get_selected().map_or((0.0, 0.0), |canvas| {
@@ -89,8 +89,13 @@ impl State {
                     let text_color = egui::Color32::WHITE; // Example: Red color
                     ui.visuals_mut().widgets.noninteractive.fg_stroke.color = text_color;
 
-                    // Display the mouse position with adjustments for pan offsets
-                    ui.label(format!("({:.1}, {:.1})", pointer_pos.x - pan_x_dif, pointer_pos.y - pan_y_dif));
+                    // Display the mouse position with adjustments for pan offsets and the zoom level
+                    if let Some(zoom) = self.canvas_list.get_selected() {
+                        ui.label(format!("({:.1}, {:.1}) : {:.1}", pointer_pos.x - pan_x_dif, pointer_pos.y - pan_y_dif, zoom.get_zoom()));
+                    }
+                    else {
+                        ui.label(format!("({:.1}, {:.1})", pointer_pos.x - pan_x_dif, pointer_pos.y - pan_y_dif));
+                    }
                 }
             });
 

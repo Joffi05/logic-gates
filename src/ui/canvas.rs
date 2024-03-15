@@ -1,7 +1,9 @@
+use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
+
 use egui_sdl2_gl::egui::{self as egui};
 use crate::{ui::drawable_gate::DrawableGate};
 
-use super::{gate_list::GhostGate};
+use super::{connection::DrawableConnections, gate_list::GhostGate};
 
 const MAX_ZOOM: f32 = 20.0;
 const MIN_ZOOM: f32 = 0.3;
@@ -10,8 +12,10 @@ pub const GRID_SPACING: f32 = 20.0;
 pub struct Canvas {
     pan_offset: egui::Vec2, // Current pan offset
     zoom: f32, // Current zoom level
-    gates: Vec<DrawableGate>, // List of gates on the canvas
+    gates: Vec<Rc<DrawableGate>>, // List of gates on the canvas
     to_spawn: Option<GhostGate>,
+    connections: Vec<DrawableConnections>,
+    to_connect: Option<DrawableConnections>,
 }
 
 impl Canvas {
@@ -21,6 +25,8 @@ impl Canvas {
             zoom: 1.0,
             gates: vec![],
             to_spawn: None,
+            connections: vec![],
+            to_connect: None,
         }
     }
 
@@ -28,8 +34,12 @@ impl Canvas {
         self.pan_offset
     }
 
+    pub fn get_zoom(&self) -> f32 {
+        self.zoom
+    }
+
     pub fn add_gate(&mut self, gate: DrawableGate) {
-        self.gates.push(gate);
+        self.gates.push(Rc::new(gate));
     }
 
     pub fn remove_selected(&mut self) {
@@ -57,6 +67,8 @@ impl Default for Canvas {
             zoom: 1.0, // Start with no zoom
             gates: Vec::new(),
             to_spawn: None,
+            connections: Vec::new(),
+            to_connect: None,
         }
     }
 }
@@ -98,10 +110,10 @@ impl Canvas {
                                 let y_pan = (adjusted_pan_y / GRID_SPACING).round() * GRID_SPACING;
 
                                 // TODO
-                                // IMplement error handling when a property is read wronlgy
-                                //that includes not reading at all because not present 
+                                // Implement error handling when a property is read wronlgy
+                                // that includes not reading at all because not present 
                                 // and wrong len of inputs_pos in comparison to num_ins
-                                //and wrong len of outputs_pos in comparison to num_outs
+                                // and wrong len of outputs_pos in comparison to num_outs
                                 // auch checken ob die inputs und outputs pos in den richtigen grenzen liegen
                                 // auch checken ob inputs und outputs gleihce einträge haben
                                 let width_o = g.files.read_props().unwrap().width;

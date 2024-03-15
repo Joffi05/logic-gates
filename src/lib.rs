@@ -292,11 +292,12 @@ impl LogicGate for Circuit {
         self.compilable()
     }
 
-    //TODO hier müsste eig &self ausreichen aber weil ich keine copy erstellen kann muss och das orig nehmen
     fn compile(&mut self) -> Result<TruthTable, CantCompileGate> {
         if !self.compilable() {
             return Err(CantCompileGate);
         }
+        let ins = self.get_inputs();
+        let outs = self.get_outputs();
 
         let mut table = TruthTable::new();
 
@@ -312,6 +313,15 @@ impl LogicGate for Circuit {
             }
             let outputs = self.get_outputs();
             table.add(inputs, outputs);
+        }
+
+        //Set inputs back to start
+        for (i, input) in self.circuit_inputs.iter_mut().enumerate() {
+            input.borrow_mut().set_input(i, ins[i]);
+        }
+        //Set ouputs back to start
+        for (i, output) in self.circuit_outputs.iter_mut().enumerate() {
+            output.borrow_mut().set_output(i, outs[i]);
         }
 
         Ok(table)

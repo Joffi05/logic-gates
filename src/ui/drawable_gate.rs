@@ -15,31 +15,34 @@ impl InOutPosition {
         Self(pos)
     }
 
-    fn calc_coord_of_center(&self, rect: egui::Rect) -> (f32, f32) {
+    fn calc_coord_of_center(&self, rect: egui::Rect, zoom_level: f32) -> (f32, f32) {
+        // Use GRID_SPACING directly, without adjusting for zoom
         let perimeter = (rect.width() + rect.height()) * 2.0;
-        let total_steps = (perimeter / GRID_SPACING).floor() as u16;
+
+        let total_steps = (perimeter / GRID_SPACING / zoom_level).round() as u16;
         let pos = self.0 % total_steps; // Normalize position to wrap around the rectangle
-
-        let horizontal_steps = (rect.width() / GRID_SPACING).floor() as u16;
-        let vertical_steps = (rect.height() / GRID_SPACING).floor() as u16;
-
+    
+        let horizontal_steps = (rect.width() / GRID_SPACING / zoom_level).round() as u16;
+        let vertical_steps = (rect.height() / GRID_SPACING / zoom_level).round() as u16;
+   
         if pos < horizontal_steps {  // Top edge
-            return (rect.min.x + pos as f32 * GRID_SPACING, rect.min.y);
+            return (rect.min.x + pos as f32 * GRID_SPACING * zoom_level, rect.min.y);
         }
-
+    
         let pos = pos - horizontal_steps;
         if pos < vertical_steps {  // Right edge
-            return (rect.max.x, rect.min.y + pos as f32 * GRID_SPACING);
+            return (rect.max.x, rect.min.y + pos as f32 * GRID_SPACING * zoom_level);
         }
-
+    
         let pos = pos - vertical_steps;
         if pos < horizontal_steps {  // Bottom edge
-            return (rect.max.x - pos as f32 * GRID_SPACING, rect.max.y);
+            return (rect.max.x - pos as f32 * GRID_SPACING * zoom_level, rect.max.y);
         }
-
+    
         let pos = pos - horizontal_steps;  // Left edge
-        (rect.min.x, rect.max.y - pos as f32 * GRID_SPACING)
-    }    
+        (rect.min.x, rect.max.y - pos as f32 * GRID_SPACING * zoom_level)
+    }
+         
 }
 
 
@@ -140,6 +143,8 @@ impl VisualBuffer {
     }
 }
 
+// TODO
+// implement rotation
 pub enum Orientation {
     Up,
     Down,
@@ -278,7 +283,7 @@ impl DrawableGate {
         }
     }
 
-    fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, _ctx: &egui::Context) {
+    fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, _ctx: &egui::Context, zoom_level: f32) {
         // Update texture if Buffer changed
         if self.visual.changed {
             self.visual.make_texture();
@@ -289,7 +294,7 @@ impl DrawableGate {
 
         // Draw stroke around the gate if it's selected
         if self.selected {
-            painter.rect_stroke(gate_rect, egui::Rounding::same(3.0), egui::Stroke::new(5.0, egui::Color32::GRAY));
+            painter.rect_stroke(gate_rect, egui::Rounding::same(1.0), egui::Stroke::new(3.5 * zoom_level, egui::Color32::GRAY));
         }
 
         // Change later based on computation and or state of the underlying gate
@@ -308,40 +313,58 @@ impl DrawableGate {
         })
     }
 
-    pub fn draw(&mut self,ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) {
+    pub fn draw(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) {
         // Convert the gate's position from a tuple to egui::Vec2 and apply zoom
         let zoom_adjusted_pos = egui::Pos2::new(self.pos.0 * zoom_level, self.pos.1 * zoom_level);
-        // Apply the pan offset to the zoom-adjusted position
-        let final_pos = zoom_adjusted_pos + pan_offset;
     
-        // Define the rectangle for the gate
+        // Define the rectangle for the gate taking into account the zoom and pan offset
         let gate_rect = egui::Rect::from_min_max(
-            final_pos,
-            final_pos + egui::vec2(self.size.0 * zoom_level, self.size.1 * zoom_level),
+            zoom_adjusted_pos + pan_offset,  // Apply pan_offset after adjusting for zoom
+            zoom_adjusted_pos + pan_offset + egui::vec2(self.size.0 * zoom_level, self.size.1 * zoom_level),  // Apply pan_offset after adjusting for zoom
         );
-
+    
         self.interaction_logic(ui, gate_rect, zoom_level);
-
+    
         if self.visual.changed {
             let lua = Lua::new();
             let code = std::fs::read_to_string(&self.files.lua).unwrap();
             lua.load(&code).exec().unwrap();
             self.call_lua_update_buffer(&lua).unwrap();
         }
-        self.draw_texture(painter, gate_rect, ctx);
+        self.draw_texture(painter, gate_rect, ctx, zoom_level);
 
-        // Draw inputs
-        for input_pos in &self.inputs_pos {
-            let (x, y) = input_pos.calc_coord_of_center(gate_rect);
-            let center = egui::pos2(x, y) + pan_offset; // Adjust the center based on pan_offset
-            painter.circle_filled(center, 5.0 * zoom_level, egui::Color32::DARK_GREEN); // Adjust circle size and color as needed
-        }
+        let circle_diameter = 15.0 * zoom_level;
+    
+        // Draw and make inputs interactive
+        for (index, input_pos) in self.inputs_pos.iter().enumerate() {
+            let (x, y) = input_pos.calc_coord_of_center(gate_rect, zoom_level);
+            let center = egui::pos2(x, y);
+            painter.circle_filled(center, circle_diameter / 2.0, egui::Color32::DARK_GREEN);
 
-        // Draw outputs
-        for output_pos in &self.outputs_pos {
-            let (x, y) = output_pos.calc_coord_of_center(gate_rect);
-            let center = egui::pos2(x, y) + pan_offset; // Adjust the center based on pan_offset
-            painter.circle_filled(center, 5.0 * zoom_level, egui::Color32::DARK_RED); // Adjust circle size and color as needed
+            // Create an interactable area for the input
+            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter, circle_diameter));
+            let interact_response = ui.put(interact_rect, egui::Button::new("").frame(false)); // Invisible button
+            if interact_response.clicked() {
+                //TODO handle inputs clicked
+                println!("Input {} clicked", index);
+                // Handle input interaction here
+            }
         }
-    }    
+    
+        // Draw and make outputs interactive
+        for (index, output_pos) in self.outputs_pos.iter().enumerate() {
+            let (x, y) = output_pos.calc_coord_of_center(gate_rect, zoom_level);
+            let center = egui::pos2(x, y);
+            painter.circle_filled(center, circle_diameter / 2.0, egui::Color32::DARK_RED);
+
+            // Create an interactable area for the output
+            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter, circle_diameter));
+            let interact_response = ui.put(interact_rect, egui::Button::new("").frame(false)); // Invisible button
+            if interact_response.clicked() {
+                //TODO handle outputs clicked
+                println!("Output {} clicked", index);
+                // Handle output interaction here
+            }
+        }
+    }     
 }

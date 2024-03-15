@@ -1,3 +1,7 @@
 TODO
 Cargo.lock
 target/
+lua.lib
+lua54.dll
+SDL2.dll
+SDL2.lib
