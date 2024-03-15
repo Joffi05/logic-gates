@@ -1,5 +1,6 @@
 NUM_OF_INS = 1
 NUM_OF_OUTS = 1
+MEMORY_SIZE = 1
 
 function Calculate(inputs)
     local result = memory[1]

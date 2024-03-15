@@ -1,5 +1,6 @@
 use core::fmt;
 use std::error::Error;
+use std::path::Path;
 use std::{cell::RefCell, vec};
 use std::rc::Rc;
 use std::collections::{HashMap, HashSet};
@@ -9,7 +10,6 @@ use mlua::{
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 mod ui;
-
 
 #[derive(Debug, Clone)]
 pub struct TruthTable{
@@ -476,6 +476,27 @@ impl BasicGate {
             calc_mode,
         }
     }
+
+    pub fn from_lua(name: String, code: Box<Path>) -> mlua::Result<Self> {
+        let code = std::fs::read(code)?;
+
+        let lua = Lua::new();
+        let globals = lua.globals();
+        lua.load(&code).exec()?;
+
+        let input_num = globals.get::<_, u8>("NUM_OF_INS")?;
+        let output_num = globals.get::<_, u8>("NUM_OF_OUTS")?;
+        let memory_len = globals.get::<_, u8>("MEMORY_SIZE")?;
+
+        // Create a gate with the given name, input and output numbers
+        let gate = Gate::with_buffer(name, vec![false; input_num as usize], vec![false; output_num as usize], vec![false; memory_len as usize]);
+
+        let calc_mode = CalcMode::Lua(LuaCode(String::from_utf8(code).unwrap()));
+        Ok(Self {
+            gate,
+            calc_mode,
+        })
+    }
 }
 
 pub fn new_and() -> Result<BasicGate, Box<dyn Error>> {
@@ -508,6 +529,12 @@ pub trait LogicGate {
     fn get_name(&self) -> String;
     fn get_inputs(&self) -> Vec<bool>;
     fn get_outputs(&self) -> Vec<bool>;
+    fn get_input_num(&self) -> usize {
+        self.get_inputs().len()
+    }
+    fn get_output_num(&self) -> usize {
+        self.get_outputs().len()
+    }
     fn set_input(&mut self, index: usize, value: bool);
     fn set_output(&mut self, index: usize, value: bool);
     fn calculate(&mut self) -> Result<(), Box<dyn Error>>;

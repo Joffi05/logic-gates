@@ -2,7 +2,6 @@ use egui_backend::egui::FullOutput;
 use egui_backend::sdl2::video::GLProfile;
 use egui_backend::{egui, gl, sdl2};
 use egui_backend::{sdl2::event::Event, DpiScaling, ShaderVersion};
-use ui::top_menu::{self, TopMenu};
 use std::time::Instant;
 // Alias the backend to something less mouthful
 use egui_sdl2_gl as egui_backend;
@@ -10,6 +9,10 @@ use sdl2::video::SwapInterval;
 
 mod ui;
 
+pub use new_logic_gates::LogicGate;
+pub use new_logic_gates::new_and;
+pub use new_logic_gates::BasicGate;
+pub use new_logic_gates::LuaCode;
 
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
