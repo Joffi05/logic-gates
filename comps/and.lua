@@ -5,6 +5,9 @@ MEMORY_SIZE = 0
 WIDTH = 3
 HEIGHT = 2
 
+INPUT_POSITIONS = {1, 3}
+OUTPUT_POSITIONS = {2}
+
 function Calculate(inputs)
     local result = true
     for i, input in ipairs(inputs) do
@@ -14,5 +17,5 @@ function Calculate(inputs)
 end
 
 function Draw(buffer)
-    buffer:set_all(255, 0, 0, 255)
+    buffer:set_all(0, 255, 0, 255)
 end

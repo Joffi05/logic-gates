@@ -97,8 +97,13 @@ impl Canvas {
                                 let x_pan = (adjusted_pan_x / GRID_SPACING).round() * GRID_SPACING;
                                 let y_pan = (adjusted_pan_y / GRID_SPACING).round() * GRID_SPACING;
 
-                                let width_o = g.files.read_props().width;
-                                let height_o = g.files.read_props().height;
+                                // TODO
+                                // IMplement error handling when a property is read wronlgy
+                                //that includes not reading at all because not present 
+                                // and wrong len of inputs_pos in comparison to num_ins
+                                //and wrong len of outputs_pos in comparison to num_outs
+                                let width_o = g.files.read_props().unwrap().width;
+                                let height_o = g.files.read_props().unwrap().height;
                                 let width;
                                 let height;
                                 if let Some(width_s) = width_o {
@@ -116,7 +121,7 @@ impl Canvas {
                                 }
                             
                                 // Calculate the final position for the new gate, considering the adjusted and rounded values
-                                self.add_gate(DrawableGate::from_ghost(g, (x - x_pan, y - y_pan), (width, height)));
+                                self.add_gate(DrawableGate::from_ghost(ctx, g, (x - x_pan, y - y_pan), (width, height)));
                             }
                             
                         }
