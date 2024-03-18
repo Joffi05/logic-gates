@@ -13,7 +13,7 @@ impl SelectableCanvas {
         Self {
             name: name.to_owned(),
             selected: false,
-            canvas: Canvas::new(),
+            canvas: Canvas::new(name),
         }
     }
 

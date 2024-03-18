@@ -7,11 +7,13 @@ use crate::LogicGate;
 
 use super::drawable_gate::GateFiles;
 use super::drawable_gate::InOutPosition;
+use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
+use std::rc::Rc;
 
 pub struct GhostGate {
-    pub gate: Box<dyn LogicGate>,
+    pub gate: Rc<RefCell<Box<dyn LogicGate>>>,
     pub files: GateFiles,
     pub inputs_pos: Vec<InOutPosition>,
     pub outputs_pos: Vec<InOutPosition>,
@@ -19,14 +21,14 @@ pub struct GhostGate {
 
 impl PartialEq for GhostGate {
     fn eq(&self, other: &Self) -> bool {
-        self.gate.get_name() == other.gate.get_name()
+        self.gate.borrow().get_name() == other.gate.borrow().get_name()
     }
 }
 
 impl Clone for GhostGate {
     fn clone(&self) -> Self {
         Self {
-            gate: Box::new(BasicGate::from_lua(self.gate.get_name(), self.files.lua.clone()).unwrap()),
+            gate: Rc::new(RefCell::new(Box::new(BasicGate::from_lua(self.gate.borrow().get_name(), self.files.lua.clone()).unwrap()))),
             files: self.files.clone(),
             inputs_pos: self.inputs_pos.clone(),
             outputs_pos: self.outputs_pos.clone(),
@@ -93,7 +95,7 @@ impl GateList {
                             let gate_name = file_name.split(".").next().unwrap().to_ascii_uppercase();
 
                             let gate = GhostGate {
-                                    gate: Box::new(BasicGate::from_lua(gate_name, gate_file.lua.clone()).unwrap()),
+                                    gate: Rc::new(RefCell::new(Box::new(BasicGate::from_lua(gate_name, gate_file.lua.clone()).unwrap()))),
                                     files: gate_file,
                                     inputs_pos: ins,
                                     outputs_pos: outs,
@@ -157,12 +159,12 @@ impl GateList {
                     for gate in &self.buttons {
                         ui.with_layout(egui::Layout::top_down_justified(egui::Align::Center), |ui| {
                             // Add a button for each label
-                            let bt_res = ui.button(gate.gate.get_name());
+                            let bt_res = ui.button(gate.gate.borrow().get_name());
                             if bt_res.clicked() {
                                 self.gate_to_spawn = Some(gate.clone());
                             }
                             if bt_res.double_clicked() {
-                                println!("Double clicked: {}", gate.gate.get_name());
+                                println!("Double clicked: {}", gate.gate.borrow().get_name());
                             }
                         });
                     }

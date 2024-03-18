@@ -1,9 +1,10 @@
-use std::{borrow::BorrowMut, cell::RefCell, rc::Rc};
+use std::{cell::{Ref, RefCell}, rc::Rc};
 
-use egui_sdl2_gl::egui::{self as egui};
-use crate::{ui::drawable_gate::DrawableGate};
+use egui_sdl2_gl::egui::{self as egui, Color32, Rect};
+use uuid::Uuid;
+use crate::{ui::drawable_gate::DrawableGate, Circuit};
 
-use super::{connection::DrawableConnections, gate_list::GhostGate};
+use super::{drawable_connection::DrawableConnection, drawable_gate::InOutPosition, gate_list::GhostGate};
 
 const MAX_ZOOM: f32 = 20.0;
 const MIN_ZOOM: f32 = 0.3;
@@ -12,21 +13,21 @@ pub const GRID_SPACING: f32 = 20.0;
 pub struct Canvas {
     pan_offset: egui::Vec2, // Current pan offset
     zoom: f32, // Current zoom level
-    gates: Vec<Rc<DrawableGate>>, // List of gates on the canvas
+    gates: Vec<Rc<RefCell<Box<DrawableGate>>>>, // List of gates on the canvas
     to_spawn: Option<GhostGate>,
-    connections: Vec<DrawableConnections>,
-    to_connect: Option<DrawableConnections>,
+    connections: Vec<DrawableConnection>,
+    underlying_circuit: Circuit,
 }
 
 impl Canvas {
-    pub fn new() -> Self {
+    pub fn new(name: &str) -> Self {
         Canvas {
             pan_offset: egui::Vec2::ZERO,
             zoom: 1.0,
             gates: vec![],
             to_spawn: None,
             connections: vec![],
-            to_connect: None,
+            underlying_circuit: Circuit::new(name.to_string()),
         }
     }
 
@@ -34,21 +35,66 @@ impl Canvas {
         self.pan_offset
     }
 
+    pub fn get_conn_len(&self) -> usize {
+        self.connections.len()
+    }
+
     pub fn get_zoom(&self) -> f32 {
         self.zoom
     }
 
     pub fn add_gate(&mut self, gate: DrawableGate) {
-        self.gates.push(Rc::new(gate));
+        let gate_rc = Rc::new(RefCell::new(Box::new(gate)));
+        let id = gate_rc.borrow().id.clone();
+        self.underlying_circuit.add_gate(gate_rc.borrow().gate.clone(), id);
+        self.gates.push(gate_rc.clone());
     }
+
+    pub fn add_connection(&mut self, connection: DrawableConnection) {
+        // Now, connect the corresponding gates in the underlying circuit
+        if let (Some(input_gate), Some(output_gate)) = (&connection.input_gate, &connection.output_gate) {
+            // Assuming `DrawableConnection` holds the indexes for input/output
+            // If not, you'll need to determine these based on your logic
+            let input_index = connection.in_num.clone(); // Default to 0 or determine based on your logic
+            let output_index = connection.out_num.clone(); // Default to 0 or determine based on your logic
+    
+            // Call the connect method on the underlying circuit with the gates and their indexes
+            self.underlying_circuit.connect(input_gate.borrow().gate.clone(), input_index.get() as usize, output_gate.borrow().gate.clone(), output_index.get() as usize);
+            println!("Underlying circuit: {:?}", self.get_conn_len());
+        }
+
+        // Add the DrawableConnection to the list of connections
+        self.connections.push(connection);
+    }
+    
 
     pub fn remove_selected(&mut self) {
-        self.gates.retain(|gate| !gate.selected);
+        // First, collect Rc pointers to the selected gates.
+        let removed_gates: Vec<Rc<RefCell<Box<DrawableGate>>>> = self.gates.iter()
+            .filter(|gate| gate.borrow().selected)
+            .cloned()  // Clone the Rc pointers, not the gates themselves.
+            .collect(); 
+    
+        // Remove the selected gates.
+        self.gates.retain(|gate| !gate.borrow().selected);
+    
+        // Remove connections associated with the removed gates.
+        self.connections.retain(|connection| {
+            // Check if the input_gate or output_gate of the connection is among the removed gates.
+            let input_gate_linked = connection.input_gate.as_ref()
+                .map_or(false, |input_gate| removed_gates.iter().any(|rg| Rc::ptr_eq(rg, input_gate)));
+            let output_gate_linked = connection.output_gate.as_ref()
+                .map_or(false, |output_gate| removed_gates.iter().any(|rg| Rc::ptr_eq(rg, output_gate)));
+    
+            // Retain the connection only if neither its input_gate nor output_gate was removed.
+            !input_gate_linked && !output_gate_linked
+        });
     }
+    
 
     pub fn unselect_all(&mut self) {
-        for gate in &mut self.gates {
-            gate.selected = false;
+        for gate_rc in &self.gates {
+            gate_rc.borrow_mut().selected = false;
         }
     }
 
@@ -58,18 +104,6 @@ impl Canvas {
 
     pub fn jump_to(&mut self, x: f32, y: f32) {
         self.pan_offset = egui::Vec2::new(x, y);
-    }
-}
-impl Default for Canvas {
-    fn default() -> Self {
-        Self {
-            pan_offset: egui::Vec2::new(0.0, 0.0),
-            zoom: 1.0, // Start with no zoom
-            gates: Vec::new(),
-            to_spawn: None,
-            connections: Vec::new(),
-            to_connect: None,
-        }
     }
 }
 
@@ -144,8 +178,8 @@ impl Canvas {
                     self.unselect_all();
                 }
 
-                // Handle panning
-                self.pan_offset += response.drag_delta() / self.zoom;
+                // Handle panninga
+                self.pan_offset += response.drag_delta();
 
                 // Handle zooming
                 let zoom_speed = 0.01;
@@ -158,14 +192,91 @@ impl Canvas {
             // Draw the grid
             self.draw_grid(&painter, response.rect);
 
-            for gate in &mut self.gates {
-                gate.draw(ctx, ui, &painter, self.pan_offset, self.zoom);
+            // First, handle drawing and collect information for connections if needed.
+            let mut clicked_in: Option<((f32, f32), Rc<RefCell<Box<DrawableGate>>>, InOutPosition)> = None;
+            let mut clicked_out: Option<((f32, f32), Rc<RefCell<Box<DrawableGate>>>, InOutPosition)> = None;
+            let mut gates_to_reset = Vec::new();
+            let mut just_connected: bool = false;
+            // Collect connection information
+            for gate in &self.gates {
+                let interacted = gate.borrow_mut().interaction_logic(ctx, ui, &painter, self.pan_offset, self.zoom);
+                
+                gate.borrow_mut().draw(ctx, ui, &painter, self.pan_offset, self.zoom);
+
+                let gate_ref = gate.borrow();
+                if let Some((pos, index, id)) = &gate_ref.in_clicked_at {
+                    println!("In clicked at: {:?}", pos.0);
+                    clicked_in = Some(((pos.0, pos.1), gate.clone(), index.clone()));
+                    gates_to_reset.push(gate.clone());
+                }
+                if let Some((pos, index, id)) = &gate_ref.out_clicked_at {
+                    println!("Out clicked at: {:?}", pos.0);
+                    clicked_out = Some(((pos.0, pos.1), gate.clone(), index.clone()));
+                    gates_to_reset.push(gate.clone());
+                }
+
+                if interacted {
+                    let zoom_level = self.zoom;
+                    for conn in self.connections.iter_mut() {
+                        if let (Some(inp), Some(out)) = (conn.input_gate.clone(), conn.output_gate.clone()) {
+                            if Rc::ptr_eq(&inp, gate) {
+                                // The current gate is the input gate for this connection
+                                // Update the start point of the connection
+                                let input_gate = inp.borrow();
+                                let (x, y)  = input_gate.get_pos_of_in_out(conn.in_num.clone(), gate.borrow().get_rect(zoom_level, self.pan_offset), zoom_level);
+                                
+                                let canvas_x = (x - self.pan_offset.x) / zoom_level;
+                                let canvas_y = (y - self.pan_offset.y) / zoom_level;
+                                
+                                conn.start = (canvas_x, canvas_y);
+                            }
+                
+                            if Rc::ptr_eq(&out, gate) {
+                                // The current gate is the output gate for this connection
+                                // Update the end point of the connection
+                                let output_gate = out.borrow();
+                                let (x, y)  = output_gate.get_pos_of_in_out(conn.out_num.clone(), gate.borrow().get_rect(zoom_level, self.pan_offset), zoom_level);
+                                
+                                let canvas_x = (x - self.pan_offset.x) / zoom_level;
+                                let canvas_y = (y - self.pan_offset.y) / zoom_level;
+                                
+                                conn.end = (canvas_x, canvas_y);
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Handle connections based on collected information
+            if let (Some((in_pos, in_gate, in_index)), Some((out_pos, out_gate, out_index))) = (clicked_in, clicked_out) {
+                let connection = DrawableConnection::with_gates(
+                    in_pos,  // Store raw position
+                    out_pos,  // Store raw position
+                    in_index,
+                    out_index,
+                    Color32::WHITE, 
+                    in_gate.clone(), 
+                    out_gate.clone(), 
+                    Uuid::new_v4()
+                );                
+                self.add_connection(connection);
+                just_connected = true;
             }
 
-            // Draw logic gates
-            // for gate in &self.gates {
-            //     self.draw_gate(&painter, gate);
-            // }
+            // Clear the clicked_at fields only for gates involved in a new connection
+            if just_connected {
+                for gate in gates_to_reset {
+                    let mut gate_ref = gate.borrow_mut();
+                    gate_ref.in_clicked_at = None;
+                    gate_ref.out_clicked_at = None;
+                }
+                just_connected = false;
+            }
+
+            // Draw the connections
+            for connection in &self.connections {
+                connection.draw(&painter, self.pan_offset, self.zoom);
+            }
         });
     }
 

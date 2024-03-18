@@ -1,9 +1,10 @@
 
-use std::{error::Error, hash::Hash, path::Path};
+use std::{cell::RefCell, error::Error, hash::Hash, path::Path, rc::Rc};
 use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, Rect, TextureHandle, TextureOptions}};
 use mlua::{Function, Lua, UserData, UserDataMethods};
+use serde::de::value::UsizeDeserializer;
 use crate::LogicGate;
-use super::{canvas::GRID_SPACING, gate_list::GhostGate};
+use super::{canvas::GRID_SPACING, drawable_connection::DrawableConnection, gate_list::GhostGate};
 use uuid::Uuid;
 
 // Describes a position on the border of a gate as number, where an input should go
@@ -13,6 +14,10 @@ pub struct InOutPosition(u16);
 impl InOutPosition {
     pub fn new(pos: u16) -> Self {
         Self(pos)
+    }
+
+    pub fn get(&self) -> u16 {
+        self.0
     }
 
     fn calc_coord_of_center(&self, rect: egui::Rect, zoom_level: f32) -> (f32, f32) {
@@ -153,16 +158,21 @@ pub enum Orientation {
 }
 
 pub struct DrawableGate {
-    gate: Box<dyn LogicGate>,
-    pos: (f32, f32),
-    size: (f32, f32),
+    pub gate: Rc<RefCell<Box<dyn LogicGate>>>,
+    pub pos: (f32, f32),
+    pub size: (f32, f32),
     visual: VisualBuffer,
-    inputs_pos: Vec<InOutPosition>,
-    outputs_pos: Vec<InOutPosition>,
+    pub inputs_pos: Vec<InOutPosition>,
+    pub outputs_pos: Vec<InOutPosition>,
     pub files: GateFiles,
     pub selected: bool,
     pub drag: (f32, f32),
     pub orientation: Orientation,
+    // in_clicked_at sollte iwann durch eventQueue in canvas ersetzt werden
+    // dann gibt es nur eine check_events methode in DrawableGate die die events returned
+    // 0 ist pos, 1 ist index, 2 ist id
+    pub in_clicked_at: Option<((f32, f32), InOutPosition, Uuid)>,    
+    pub out_clicked_at: Option<((f32, f32), InOutPosition, Uuid)>,
     pub id: uuid::Uuid,
 }
 
@@ -179,9 +189,9 @@ impl PartialEq for DrawableGate {
 }
 
 impl DrawableGate {
-    pub fn new(ctx: &egui::Context,gate: Box<dyn LogicGate>, pos: (f32, f32), size: (f32, f32), inputs_pos: Vec<InOutPosition>, outputs_pos: Vec<InOutPosition>) -> Self {
-        let lua = Path::new("comps").join(gate.get_name().to_ascii_lowercase() + ".lua");
-        let json = Path::new("comps").join(gate.get_name().to_ascii_lowercase() + ".json");
+    pub fn new(ctx: &egui::Context,gate: Rc<RefCell<Box<dyn LogicGate>>>, pos: (f32, f32), size: (f32, f32), inputs_pos: Vec<InOutPosition>, outputs_pos: Vec<InOutPosition>) -> Self {
+        let lua = Path::new("comps").join(gate.borrow().get_name().to_ascii_lowercase() + ".lua");
+        let json = Path::new("comps").join(gate.borrow().get_name().to_ascii_lowercase() + ".json");
 
         let id = Uuid::new_v4();
 
@@ -218,8 +228,22 @@ impl DrawableGate {
             selected: false,
             drag: (0.0, 0.0),
             orientation: Orientation::Right,
+            in_clicked_at: None,
+            out_clicked_at: None,
             id,
         }
+    }
+
+    pub fn get_rect(&self, zoom_level: f32, pan_offset: egui::Vec2) -> egui::Rect {
+        let zoom_adjusted_pos = egui::Pos2::new(self.pos.0 * zoom_level, self.pos.1 * zoom_level);
+        egui::Rect::from_min_max(
+            zoom_adjusted_pos + pan_offset,
+            zoom_adjusted_pos + pan_offset + egui::vec2(self.size.0 * zoom_level, self.size.1 * zoom_level),
+        )
+    }
+
+    pub fn get_pos_of_in_out(&self, in_out: InOutPosition, gate_rect: egui::Rect, zoom_level: f32) -> (f32, f32) {
+        in_out.calc_coord_of_center(gate_rect, zoom_level)
     }
 
     pub fn from_ghost(ctx: &egui::Context, gate: GhostGate, pos: (f32, f32), size: (f32, f32)) -> Self {
@@ -253,11 +277,27 @@ impl DrawableGate {
             selected: false,
             drag: (0.0, 0.0),
             orientation: Orientation::Right,
+            in_clicked_at: None,
+            out_clicked_at: None,
             id: Uuid::new_v4(),
         }
     }
 
-    fn interaction_logic(&mut self, ui: &mut egui::Ui, gate_rect: egui::Rect, zoom_level: f32) {
+    pub fn set_selected(&mut self, selected: bool) {
+        self.selected = selected;
+    }
+
+    pub fn interaction_logic(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) -> bool {
+        // Convert the gate's position from a tuple to egui::Vec2 and apply zoom
+        let zoom_adjusted_pos = egui::Pos2::new(self.pos.0 * zoom_level, self.pos.1 * zoom_level);
+    
+        // Define the rectangle for the gate taking into account the zoom and pan offset
+        let gate_rect = egui::Rect::from_min_max(
+            zoom_adjusted_pos + pan_offset,  // Apply pan_offset after adjusting for zoom
+            zoom_adjusted_pos + pan_offset + egui::vec2(self.size.0 * zoom_level, self.size.1 * zoom_level),  // Apply pan_offset after adjusting for zoom
+        );
+    
+
         let interact = ui.interact(gate_rect, egui::Id::new(&self), egui::Sense::click_and_drag());
 
         if interact.clicked() {
@@ -281,6 +321,8 @@ impl DrawableGate {
                 }
             }
         }
+
+        return self.selected
     }
 
     fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, _ctx: &egui::Context, zoom_level: f32) {
@@ -314,16 +356,7 @@ impl DrawableGate {
     }
 
     pub fn draw(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) {
-        // Convert the gate's position from a tuple to egui::Vec2 and apply zoom
-        let zoom_adjusted_pos = egui::Pos2::new(self.pos.0 * zoom_level, self.pos.1 * zoom_level);
-    
-        // Define the rectangle for the gate taking into account the zoom and pan offset
-        let gate_rect = egui::Rect::from_min_max(
-            zoom_adjusted_pos + pan_offset,  // Apply pan_offset after adjusting for zoom
-            zoom_adjusted_pos + pan_offset + egui::vec2(self.size.0 * zoom_level, self.size.1 * zoom_level),  // Apply pan_offset after adjusting for zoom
-        );
-    
-        self.interaction_logic(ui, gate_rect, zoom_level);
+        let gate_rect = self.get_rect(zoom_level, pan_offset);
     
         if self.visual.changed {
             let lua = Lua::new();
@@ -342,13 +375,15 @@ impl DrawableGate {
             painter.circle_filled(center, circle_diameter / 2.0, egui::Color32::DARK_GREEN);
 
             // Create an interactable area for the input
-            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter, circle_diameter));
+            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter / 2.0, circle_diameter / 2.0));
             let interact_response = ui.put(interact_rect, egui::Button::new("").frame(false)); // Invisible button
             if interact_response.clicked() {
-                //TODO handle inputs clicked
-                println!("Input {} clicked", index);
-                // Handle input interaction here
-            }
+                println!("Input {} of gate {} clicked", index, self.id);
+                // Convert view space coordinates back to canvas space
+                let canvas_x = (center.x - pan_offset.x) / zoom_level;
+                let canvas_y = (center.y - pan_offset.y) / zoom_level;
+                self.in_clicked_at = Some(((canvas_x, canvas_y), input_pos.clone(), self.id));
+            }         
         }
     
         // Draw and make outputs interactive
@@ -361,10 +396,12 @@ impl DrawableGate {
             let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter, circle_diameter));
             let interact_response = ui.put(interact_rect, egui::Button::new("").frame(false)); // Invisible button
             if interact_response.clicked() {
-                //TODO handle outputs clicked
-                println!("Output {} clicked", index);
-                // Handle output interaction here
-            }
+                println!("Output {} of gate {} clicked", index, self.id);
+                // Convert view space coordinates back to canvas space
+                let canvas_x = (center.x - pan_offset.x) / zoom_level;
+                let canvas_y = (center.y - pan_offset.y) / zoom_level;
+                self.out_clicked_at = Some(((canvas_x, canvas_y), output_pos.clone(), self.id));
+            }       
         }
     }     
 }

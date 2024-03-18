@@ -8,6 +8,7 @@ use mlua::{
     Function, Lua,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use uuid::Uuid;
 
 mod ui;
 
@@ -135,11 +136,10 @@ impl LogicGate for CircuitBus {
     }
 }
 
-
 // Structure that holds many gates and can be compiled to a new gate
 pub struct Circuit {
     name: String,
-    gates: Vec<Rc<RefCell<Box<dyn LogicGate>>>>,
+    gates: Vec<(Rc<RefCell<Box<dyn LogicGate>>>, Uuid)>,
     connections: Vec<Connection>,
     circuit_inputs: Vec<Rc<RefCell<Box<dyn LogicGate>>>>,
     circuit_outputs: Vec<Rc<RefCell<Box<dyn LogicGate>>>>,
@@ -166,9 +166,13 @@ impl Circuit {
         output
     }
 
-    pub fn add_gate(&mut self, gate: Rc<RefCell<Box<dyn LogicGate>>>) -> Rc<RefCell<Box<dyn LogicGate>>> {
-        self.gates.push(gate.clone());
+    pub fn add_gate(&mut self, gate: Rc<RefCell<Box<dyn LogicGate>>>, id: Uuid) -> Rc<RefCell<Box<dyn LogicGate>>> {
+        self.gates.push((gate.clone(), id));
         gate
+    }
+
+    pub fn get_gate_num(&self) -> usize {
+        self.gates.len()
     }
 
     pub fn conn_input_to_gate(&mut self, input_num: usize, gate: Rc<RefCell<Box<dyn LogicGate>>>, dest_in_num: usize) -> Result<(), CantConnect> {
@@ -178,7 +182,7 @@ impl Circuit {
         }
     
         // Check if "gate" is in self.gates by comparing Rc pointers
-        let gate_in_circuit = self.gates.iter().any(|g| Rc::ptr_eq(g, &gate));
+        let gate_in_circuit = self.gates.iter().any(|g| Rc::ptr_eq(&g.0, &gate));
     
         if !gate_in_circuit {
             return Err(CantConnect { err: "Gate not in circuit".to_string() });
@@ -197,7 +201,7 @@ impl Circuit {
         }
     
         // Check if "gate" is in self.gates by comparing Rc pointers
-        let gate_in_circuit = self.gates.iter().any(|g| Rc::ptr_eq(g, &gate));
+        let gate_in_circuit = self.gates.iter().any(|g| Rc::ptr_eq(&g.0, &gate));
     
         if !gate_in_circuit {
             return Err(CantConnect { err: format!("Gate {} not in circuit", gate.borrow().get_name()).to_string() });
@@ -218,7 +222,7 @@ impl Circuit {
     
     pub fn compilable(&self) -> bool {
         for gate in self.gates.iter() {
-            if !gate.borrow().compilable() {
+            if !gate.0.borrow().compilable() {
                 return false;
             }
         }
