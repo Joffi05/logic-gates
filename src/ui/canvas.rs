@@ -256,9 +256,33 @@ impl Canvas {
                     for g in self.gates.iter() {
                         match event {
                             GateEvent::ClickedOn { id } => {
-                                if g.borrow().id == *id {
-                                    g.borrow_mut().selected = true;
-                                }                            
+                                for g in self.gates.iter() {
+                                    let mut g_ref = g.borrow_mut();
+                                    if g_ref.id == *id {
+                                        println!("Clicked on gate: {:?}", g_ref.id);
+                                        g_ref.selected = true;
+                            
+                                        // Determine if the gate is a "BUTTON" while we have a borrow.
+                                        let is_button = g_ref.gate.borrow().get_name() == "BUTTON";
+                                        
+                                        // Drop the borrow on g_ref to avoid borrow conflicts later.
+                                        drop(g_ref); 
+                            
+                                        // Only proceed if the gate is a "BUTTON".
+                                        if is_button {
+                                            println!("Button clicked");
+                                            // Obtain a new borrow to modify the gate.
+                                            // Since g_ref has been dropped, this is a new, separate borrow.
+                                            let gate_ref = g.borrow_mut(); // Borrow the DrawableGate mutably again.
+                                            let mut gate_logic_ref = gate_ref.gate.borrow_mut(); // Borrow the inner logic gate mutably.
+                            
+                                            if let Some(memory) = gate_logic_ref.get_memory() {
+                                                println!("Memory before: {:?}", memory[0]);
+                                                gate_logic_ref.set_memory(0, !memory[0]);
+                                            }
+                                        }
+                                    }
+                                }
                             },
                             GateEvent::ClickedIn { num, id } => {
                                 if g.borrow().id == *id {

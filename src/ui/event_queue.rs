@@ -101,9 +101,7 @@ impl EventQueue {
         if self.mutate_last_if_same(&mut event) {
             // If the last event cannot be mutated, add the new event to the queue
             self.events.push(event);
-
-
-
+            println!("Length: {}", self.events.len());
             // Return true indicating that a new event was added
             return true;
         }

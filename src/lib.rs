@@ -344,7 +344,7 @@ pub fn compile_gate_to_truth_table(gate: &mut Gate, code: &LuaCode) -> Result<Tr
         let binary = format!("{:0width$b}", i, width = gate.inputs.len());
         let inputs: Vec<bool> = binary.chars().map(|c| c == '1').collect();
         gate.inputs = inputs.clone();  // Make sure the gate's inputs are updated for each iteration
-        gate.calculate(&CalcMode::Lua(code.clone())).unwrap();
+        gate.calculate(&CalcMode::Lua(code.clone(), Lua::new())).unwrap();
         let outputs = gate.outputs.clone();
         table.add(inputs, outputs);
     }
@@ -362,7 +362,7 @@ pub struct Gate {
 #[derive(Debug, Clone)]
 pub struct LuaCode(pub String);
 pub enum CalcMode {
-    Lua(LuaCode),
+    Lua(LuaCode, Lua),
     TruthTable(TruthTable),
 }
 
@@ -405,6 +405,14 @@ impl Gate {
         self.outputs[index] = value;
     }
 
+    pub fn set_memory(&mut self, index: usize, value: bool) {
+        self.memory[index] = value;
+    }
+
+    pub fn get_memory(&self) -> Vec<bool> {
+        self.memory.clone()
+    }
+
     pub fn is_stateful(&self) -> bool {
         if self.memory.len() != 0 {
             return true;
@@ -415,9 +423,7 @@ impl Gate {
 
     pub fn calculate(&mut self, calc: &CalcMode) -> mlua::Result<()> {
         match calc {
-            CalcMode::Lua(lua_code) => {
-                let lua = Lua::new();
-
+            CalcMode::Lua(lua_code, lua) => {
                 let globals = lua.globals();
                 
                 // Lade den lua code
@@ -492,20 +498,25 @@ impl BasicGate {
     }
 
     pub fn from_lua(name: String, code: Box<Path>) -> mlua::Result<Self> {
-        let code = std::fs::read(code)?;
-
+        let code_contents = std::fs::read(&code)?;
         let lua = Lua::new();
-        let globals = lua.globals();
-        lua.load(&code).exec()?;
-
-        let input_num = globals.get::<_, u8>("NUM_OF_INS")?;
-        let output_num = globals.get::<_, u8>("NUM_OF_OUTS")?;
-        let memory_len = globals.get::<_, u8>("MEMORY_SIZE")?;
-
+    
+        // Limit the scope of the globals borrow
+        let (input_num, output_num, memory_len) = {
+            let globals = lua.globals();
+            lua.load(&String::from_utf8(code_contents.clone()).unwrap()).exec()?;
+    
+            let input_num = globals.get::<_, u8>("NUM_OF_INS")?;
+            let output_num = globals.get::<_, u8>("NUM_OF_OUTS")?;
+            let memory_len = globals.get::<_, u8>("MEMORY_SIZE")?;
+    
+            (input_num, output_num, memory_len)
+        };
+    
         // Create a gate with the given name, input and output numbers
         let gate = Gate::with_buffer(name, vec![false; input_num as usize], vec![false; output_num as usize], vec![false; memory_len as usize]);
-
-        let calc_mode = CalcMode::Lua(LuaCode(String::from_utf8(code).unwrap()));
+    
+        let calc_mode = CalcMode::Lua(LuaCode(String::from_utf8(code_contents).unwrap()), lua);
         Ok(Self {
             gate,
             calc_mode,
@@ -513,31 +524,6 @@ impl BasicGate {
     }
 }
 
-pub fn new_and() -> Result<BasicGate, Box<dyn Error>> {
-    let gate = Gate::new("AND".to_string(), vec![false, false], vec![false]);
-    let tt = load_truth_table("./comps/and.json")?; 
-    let calc_mode = CalcMode::TruthTable(tt);
-    Ok(BasicGate::from_gate(gate, calc_mode))
-}
-pub fn new_or() -> Result<BasicGate, Box<dyn Error>> {
-    let gate = Gate::new("OR".to_string(), vec![false, false], vec![false]);
-    let tt = load_truth_table("./comps/or.json")?; 
-    let calc_mode = CalcMode::TruthTable(tt);
-    Ok(BasicGate::from_gate(gate, calc_mode))
-}
-pub fn new_not() -> Result<BasicGate, Box<dyn Error>> {
-    let gate = Gate::new("NOT".to_string(), vec![false], vec![false]);
-    let tt = load_truth_table("./comps/not.json")?; 
-    let calc_mode = CalcMode::TruthTable(tt);
-    Ok(BasicGate::from_gate(gate, calc_mode))
-}
-pub fn new_buffer() -> Result<BasicGate, Box<dyn Error>> {
-    let gate = Gate::with_buffer("BUFFER".to_string(), vec![false], vec![false], vec![false]);
-    let code = std::fs::read("./comps/buffer.lua")?;
-    let code = LuaCode(String::from_utf8(code).unwrap());
-    let calc_mode = CalcMode::Lua(code);
-    Ok(BasicGate::from_gate(gate, calc_mode))
-}
 
 pub trait LogicGate {
     fn get_name(&self) -> String;
@@ -554,6 +540,13 @@ pub trait LogicGate {
     fn calculate(&mut self) -> Result<(), Box<dyn Error>>;
     fn compilable(&self) -> bool;
     fn compile(&mut self) -> Result<TruthTable, CantCompileGate>;
+    fn set_memory(&mut self, _index: usize, _value: bool) {}
+    fn get_memory(&self) -> Option<Vec<bool>> {
+        None
+    }
+    fn get_lua_env(&mut self) -> Option<&mut Lua> {
+        None
+    }
 }
 
 impl LogicGate for BasicGate {
@@ -589,7 +582,7 @@ impl LogicGate for BasicGate {
     fn compile(&mut self) -> Result<TruthTable, CantCompileGate> {
         if self.compilable() {
             match &self.calc_mode {
-                CalcMode::Lua(code) => {
+                CalcMode::Lua(code, _lua) => {
                     compile_gate_to_truth_table(&mut self.gate, &code)
                 },
                 CalcMode::TruthTable(tt) => {
@@ -600,6 +593,25 @@ impl LogicGate for BasicGate {
         else {
             Err(CantCompileGate)
         
+        }
+    }
+
+    fn set_memory(&mut self, _index: usize, _value: bool) {
+        self.gate.set_memory(_index, _value);
+    }
+
+    fn get_memory(&self) -> Option<Vec<bool>> {
+        Some(self.gate.get_memory())
+    }
+
+    fn get_lua_env(&mut self) -> Option<&mut Lua> {
+        match &mut self.calc_mode {
+            CalcMode::Lua(_code, lua) => {
+                Some(lua)
+            },
+            CalcMode::TruthTable(_tt) => {
+                None
+            }
         }
     }
 }

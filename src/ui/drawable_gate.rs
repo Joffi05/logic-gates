@@ -119,7 +119,18 @@ impl UserData for &mut VisualBuffer {
             this.changed = true;
             Ok(())
         });
-        
+        methods.add_method_mut("add_rect", |_, this, (x, y, width, height, color): (u32, u32, u32, u32, (u8, u8, u8, u8))| {
+            for i in y..y+height {
+                for j in x..x+width {
+                    let index = (i * this.size.0 + j) as usize;
+                    if index < this.buffer.len() {
+                        this.buffer[index] = (color.0, color.1, color.2, color.3).into();
+                    }
+                }
+            }
+            this.changed = true;
+            Ok(())
+        });
         methods.add_method_mut("set_all", |_, this, color: (u8, u8, u8, u8)| {
             for i in 0..this.buffer.len() {
                 this.buffer[i] = [color.0, color.1, color.2, color.3];
@@ -303,18 +314,24 @@ impl DrawableGate {
         self.visual.changed = false;
     }
 
-    pub fn call_lua_update_buffer(&mut self, lua: &Lua) -> mlua::Result<()> {
+    pub fn call_lua_update_buffer(&mut self) -> mlua::Result<()> {
+        // Bind the borrow to a local variable to extend its lifetime
+        let mut gate_ref = self.gate.borrow_mut();
+
+        // Now use gate_ref to get the Lua environment
+        let lua = gate_ref.get_lua_env().ok_or_else(|| mlua::Error::RuntimeError("Failed to get Lua environment".to_string()))?;
+
         lua.scope(|scope| {
             let visual_buff_ref = scope.create_nonstatic_userdata(&mut self.visual)?;
-            
-            let draw_func: Function = lua.globals().get("Draw")?; // Assuming your Lua function is named "draw_gate"
+
+            let draw_func: Function = lua.globals().get("Draw")?; // Assuming your Lua function is named "Draw"
 
             draw_func.call::<_, ()>((visual_buff_ref,))?;
-            
+
             Ok(())
         })
     }
-
+    
     pub fn get_events(&self, res: &egui::Response, ptr_pos: egui::Pos2, pan_offset: egui::Vec2, zoom_level: f32) -> Option<GateEvent> {
         let gate_rect = self.get_rect(zoom_level, pan_offset);
 
@@ -365,15 +382,11 @@ impl DrawableGate {
 
     pub fn draw(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) {
         let gate_rect = self.get_rect(zoom_level, pan_offset);
-        
-        if self.visual.changed {
-            let lua = Lua::new();
-            let code = std::fs::read_to_string(&self.files.lua).unwrap();
-            lua.load(&code).exec().unwrap();
-            self.call_lua_update_buffer(&lua).unwrap();
-        }
+    
+        self.call_lua_update_buffer().unwrap();
+    
         self.draw_texture(painter, gate_rect, ctx, zoom_level);
-
+    
         // Draw inputs
         for input_pos in self.inputs_pos.iter() {
             let (x, y) = input_pos.calc_coord_of_center(gate_rect, zoom_level);
@@ -387,5 +400,6 @@ impl DrawableGate {
             let center = egui::pos2(x, y);
             painter.circle_filled(center, IN_OUT_CIRCLE_DIAMETER * zoom_level / 2.0, egui::Color32::DARK_RED);   
         }
-    }     
+    }
+    
 }

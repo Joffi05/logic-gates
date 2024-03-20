@@ -6,4 +6,3 @@ pub mod canvas_list;
 pub mod drawable_gate;
 pub mod drawable_connection;
 pub mod event_queue;
-pub mod special_gates;

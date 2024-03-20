@@ -10,7 +10,6 @@ use sdl2::video::SwapInterval;
 mod ui;
 
 pub use new_logic_gates::LogicGate;
-pub use new_logic_gates::new_and;
 pub use new_logic_gates::BasicGate;
 pub use new_logic_gates::LuaCode;
 pub use new_logic_gates::Circuit;
