@@ -66,7 +66,7 @@ impl State {
         self.update(ctx);
 
         if let Some(canvas) = self.canvas_list.get_selected() {
-            canvas.draw(ctx);
+            canvas.update(ctx);
         }
 
         self.top_menu.show(ctx);

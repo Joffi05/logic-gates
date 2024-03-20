@@ -7,6 +7,8 @@ use crate::LogicGate;
 
 use super::drawable_gate::GateFiles;
 use super::drawable_gate::InOutPosition;
+use super::special_gates::ButtonGate;
+use super::special_gates::LampGate;
 use std::cell::RefCell;
 use std::fs;
 use std::path::Path;
@@ -47,7 +49,27 @@ pub struct GateList {
 
 impl GateList {
     pub fn new() -> Self {
-        Self { buttons: vec![], pinned: false, open: true, anchor: [0.0, 0.0], gate_to_spawn: None}
+        let button = GhostGate {
+            gate: Rc::new(RefCell::new(Box::new(ButtonGate::new()))),
+            files: GateFiles {
+                lua: Path::new("comps/button.lua").to_path_buf().into_boxed_path(),
+                json: None,
+            },
+            inputs_pos: vec![],
+            outputs_pos: vec![InOutPosition(3)],
+        };
+
+        let lamp = GhostGate {
+            gate: Rc::new(RefCell::new(Box::new(LampGate::new()))),
+            files: GateFiles {
+                lua: Path::new("comps/lamp.lua").to_path_buf().into_boxed_path(),
+                json: None,
+            },
+            inputs_pos: vec![InOutPosition(7)],
+            outputs_pos: vec![],
+        };
+
+        Self { buttons: vec![button, lamp], pinned: false, open: true, anchor: [0.0, 0.0], gate_to_spawn: None}
     }
 
     fn add_gate(&mut self, gate: GhostGate) {

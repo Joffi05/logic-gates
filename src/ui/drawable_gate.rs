@@ -4,12 +4,14 @@ use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, Rect, TextureHandle, Text
 use mlua::{Function, Lua, UserData, UserDataMethods};
 use serde::de::value::UsizeDeserializer;
 use crate::LogicGate;
-use super::{canvas::GRID_SPACING, drawable_connection::DrawableConnection, gate_list::GhostGate};
+use super::{canvas::GRID_SPACING, drawable_connection::DrawableConnection, event_queue::GateEvent, gate_list::GhostGate};
 use uuid::Uuid;
+
+const IN_OUT_CIRCLE_DIAMETER: f32 = 15.0;
 
 // Describes a position on the border of a gate as number, where an input should go
 #[derive(Clone, Debug)]
-pub struct InOutPosition(u16);
+pub struct InOutPosition(pub u16);
 
 impl InOutPosition {
     pub fn new(pos: u16) -> Self {
@@ -166,13 +168,8 @@ pub struct DrawableGate {
     pub outputs_pos: Vec<InOutPosition>,
     pub files: GateFiles,
     pub selected: bool,
-    pub drag: (f32, f32),
     pub orientation: Orientation,
-    // in_clicked_at sollte iwann durch eventQueue in canvas ersetzt werden
-    // dann gibt es nur eine check_events methode in DrawableGate die die events returned
-    // 0 ist pos, 1 ist index, 2 ist id
-    pub in_clicked_at: Option<((f32, f32), InOutPosition, Uuid)>,    
-    pub out_clicked_at: Option<((f32, f32), InOutPosition, Uuid)>,
+    pub drag: (f32, f32),
     pub id: uuid::Uuid,
 }
 
@@ -226,10 +223,8 @@ impl DrawableGate {
             outputs_pos,
             files,
             selected: false,
-            drag: (0.0, 0.0),
             orientation: Orientation::Right,
-            in_clicked_at: None,
-            out_clicked_at: None,
+            drag: (0.0, 0.0),
             id,
         }
     }
@@ -242,7 +237,12 @@ impl DrawableGate {
         )
     }
 
-    pub fn get_pos_of_in_out(&self, in_out: InOutPosition, gate_rect: egui::Rect, zoom_level: f32) -> (f32, f32) {
+    pub fn move_to(&mut self, new_pos: (f32, f32)) {
+        self.pos = new_pos;
+    }
+
+    pub fn get_pos_of_in_out(&self, in_out: InOutPosition, zoom_level: f32, pan_offset: egui::Vec2) -> (f32, f32) {
+        let gate_rect = self.get_rect(zoom_level, pan_offset);
         in_out.calc_coord_of_center(gate_rect, zoom_level)
     }
 
@@ -275,54 +275,14 @@ impl DrawableGate {
             inputs_pos: gate.inputs_pos,
             outputs_pos: gate.outputs_pos,
             selected: false,
-            drag: (0.0, 0.0),
             orientation: Orientation::Right,
-            in_clicked_at: None,
-            out_clicked_at: None,
+            drag: (0.0, 0.0),
             id: Uuid::new_v4(),
         }
     }
 
     pub fn set_selected(&mut self, selected: bool) {
         self.selected = selected;
-    }
-
-    pub fn interaction_logic(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) -> bool {
-        // Convert the gate's position from a tuple to egui::Vec2 and apply zoom
-        let zoom_adjusted_pos = egui::Pos2::new(self.pos.0 * zoom_level, self.pos.1 * zoom_level);
-    
-        // Define the rectangle for the gate taking into account the zoom and pan offset
-        let gate_rect = egui::Rect::from_min_max(
-            zoom_adjusted_pos + pan_offset,  // Apply pan_offset after adjusting for zoom
-            zoom_adjusted_pos + pan_offset + egui::vec2(self.size.0 * zoom_level, self.size.1 * zoom_level),  // Apply pan_offset after adjusting for zoom
-        );
-    
-
-        let interact = ui.interact(gate_rect, egui::Id::new(&self), egui::Sense::click_and_drag());
-
-        if interact.clicked() {
-            self.selected = !self.selected;
-        }
-
-        if self.selected {
-            self.selected = true;
-
-            if interact.dragged() {
-                self.drag.0 += interact.drag_delta().x / zoom_level;
-                self.drag.1 += interact.drag_delta().y / zoom_level;
-
-                if self.drag.0.abs() > GRID_SPACING {
-                    self.pos.0 += self.drag.0.signum() * GRID_SPACING;
-                    self.drag.0 = 0.0;
-                }
-                if self.drag.1.abs() > GRID_SPACING {
-                    self.pos.1 += self.drag.1.signum() * GRID_SPACING;
-                    self.drag.1 = 0.0;
-                }
-            }
-        }
-
-        return self.selected
     }
 
     fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, _ctx: &egui::Context, zoom_level: f32) {
@@ -355,9 +315,57 @@ impl DrawableGate {
         })
     }
 
+    pub fn get_events(&self, res: &egui::Response, ptr_pos: egui::Pos2, pan_offset: egui::Vec2, zoom_level: f32) -> Option<GateEvent> {
+        let gate_rect = self.get_rect(zoom_level, pan_offset);
+
+        let mut event: Option<GateEvent> = None;
+        
+        if res.clicked() && gate_rect.contains(ptr_pos) {
+            event = Some(GateEvent::ClickedOn { id: self.id });
+        } else if self.selected {
+            event = Some(GateEvent::MovedGate {
+                id: self.id,
+                from: (self.pos.0, self.pos.1),
+                to: (self.pos.0 + res.drag_delta().x / zoom_level, self.pos.1 + res.drag_delta().y / zoom_level),
+                start: (self.pos.0, self.pos.1),
+            });
+        }
+
+        for input_pos in self.inputs_pos.iter() {
+            let (x, y) = input_pos.calc_coord_of_center(gate_rect, zoom_level);
+            let center = egui::pos2(x, y);
+
+            // Create an interactable area for the input
+            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(IN_OUT_CIRCLE_DIAMETER / 2.0, IN_OUT_CIRCLE_DIAMETER / 2.0));
+            if interact_rect.contains(ptr_pos) && res.clicked() {
+                event = Some(GateEvent::ClickedIn {
+                    id: self.id,
+                    num: input_pos.clone(),
+                })
+            }         
+        }
+
+        // Draw and make outputs interactive
+        for output_pos in self.outputs_pos.iter() {
+            let (x, y) = output_pos.calc_coord_of_center(gate_rect, zoom_level);
+            let center = egui::pos2(x, y);
+
+            // Create an interactable area for the input
+            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(IN_OUT_CIRCLE_DIAMETER / 2.0, IN_OUT_CIRCLE_DIAMETER / 2.0));
+            if interact_rect.contains(ptr_pos) && res.clicked() {
+                event = Some(GateEvent::ClickedOut {
+                    id: self.id,
+                    num: output_pos.clone(),
+                })
+            }         
+        }
+
+        event
+    }
+
     pub fn draw(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) {
         let gate_rect = self.get_rect(zoom_level, pan_offset);
-    
+        
         if self.visual.changed {
             let lua = Lua::new();
             let code = std::fs::read_to_string(&self.files.lua).unwrap();
@@ -366,42 +374,18 @@ impl DrawableGate {
         }
         self.draw_texture(painter, gate_rect, ctx, zoom_level);
 
-        let circle_diameter = 15.0 * zoom_level;
-    
-        // Draw and make inputs interactive
-        for (index, input_pos) in self.inputs_pos.iter().enumerate() {
+        // Draw inputs
+        for input_pos in self.inputs_pos.iter() {
             let (x, y) = input_pos.calc_coord_of_center(gate_rect, zoom_level);
             let center = egui::pos2(x, y);
-            painter.circle_filled(center, circle_diameter / 2.0, egui::Color32::DARK_GREEN);
-
-            // Create an interactable area for the input
-            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter / 2.0, circle_diameter / 2.0));
-            let interact_response = ui.put(interact_rect, egui::Button::new("").frame(false)); // Invisible button
-            if interact_response.clicked() {
-                println!("Input {} of gate {} clicked", index, self.id);
-                // Convert view space coordinates back to canvas space
-                let canvas_x = (center.x - pan_offset.x) / zoom_level;
-                let canvas_y = (center.y - pan_offset.y) / zoom_level;
-                self.in_clicked_at = Some(((canvas_x, canvas_y), input_pos.clone(), self.id));
-            }         
+            painter.circle_filled(center, IN_OUT_CIRCLE_DIAMETER * zoom_level / 2.0, egui::Color32::DARK_GREEN);    
         }
     
-        // Draw and make outputs interactive
-        for (index, output_pos) in self.outputs_pos.iter().enumerate() {
+        // Draw outputs
+        for output_pos in self.outputs_pos.iter() {
             let (x, y) = output_pos.calc_coord_of_center(gate_rect, zoom_level);
             let center = egui::pos2(x, y);
-            painter.circle_filled(center, circle_diameter / 2.0, egui::Color32::DARK_RED);
-
-            // Create an interactable area for the output
-            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(circle_diameter, circle_diameter));
-            let interact_response = ui.put(interact_rect, egui::Button::new("").frame(false)); // Invisible button
-            if interact_response.clicked() {
-                println!("Output {} of gate {} clicked", index, self.id);
-                // Convert view space coordinates back to canvas space
-                let canvas_x = (center.x - pan_offset.x) / zoom_level;
-                let canvas_y = (center.y - pan_offset.y) / zoom_level;
-                self.out_clicked_at = Some(((canvas_x, canvas_y), output_pos.clone(), self.id));
-            }       
+            painter.circle_filled(center, IN_OUT_CIRCLE_DIAMETER * zoom_level / 2.0, egui::Color32::DARK_RED);   
         }
     }     
 }

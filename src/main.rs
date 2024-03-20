@@ -14,6 +14,8 @@ pub use new_logic_gates::new_and;
 pub use new_logic_gates::BasicGate;
 pub use new_logic_gates::LuaCode;
 pub use new_logic_gates::Circuit;
+pub use new_logic_gates::TruthTable;
+pub use new_logic_gates::CantCompileGate;
 
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
