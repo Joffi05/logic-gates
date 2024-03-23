@@ -1,7 +1,7 @@
 
 use std::{cell::RefCell, error::Error, hash::Hash, path::Path, rc::Rc};
 use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, Rect, TextureHandle, TextureOptions}};
-use mlua::{Function, Lua, UserData, UserDataMethods};
+use mlua::{Debug, Function, Lua, UserData, UserDataMethods};
 use serde::de::value::UsizeDeserializer;
 use crate::LogicGate;
 use super::{canvas::GRID_SPACING, drawable_connection::DrawableConnection, event_queue::GateEvent, gate_list::GhostGate};
@@ -27,7 +27,14 @@ impl InOutPosition {
         let perimeter = (rect.width() + rect.height()) * 2.0;
 
         let total_steps = (perimeter / GRID_SPACING / zoom_level).round() as u16;
-        let pos = self.0 % total_steps; // Normalize position to wrap around the rectangle
+
+        let mut pos= 0;
+        if total_steps == 0 {
+            let pos = self.0 % 4; // Normalize position to wrap around the rectangle
+        }
+        else {
+            pos = self.0 % total_steps; // Normalize position to wrap around the rectangle
+        }
     
         let horizontal_steps = (rect.width() / GRID_SPACING / zoom_level).round() as u16;
         let vertical_steps = (rect.height() / GRID_SPACING / zoom_level).round() as u16;
@@ -182,6 +189,14 @@ pub struct DrawableGate {
     pub orientation: Orientation,
     pub drag: (f32, f32),
     pub id: uuid::Uuid,
+}
+
+impl core::fmt::Debug for DrawableGate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DrawableGate")
+            .field("id", &self.id)
+            .finish()
+    }
 }
 
 impl Hash for DrawableGate {
@@ -339,7 +354,7 @@ impl DrawableGate {
         
         if res.clicked() && gate_rect.contains(ptr_pos) {
             event = Some(GateEvent::ClickedOn { id: self.id });
-        } else if self.selected {
+        } else if self.selected && (res.drag_delta().x.abs() > 0.01 || res.drag_delta().y.abs() > 0.01) {
             event = Some(GateEvent::MovedGate {
                 id: self.id,
                 from: (self.pos.0, self.pos.1),
@@ -368,7 +383,7 @@ impl DrawableGate {
             let center = egui::pos2(x, y);
 
             // Create an interactable area for the input
-            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(IN_OUT_CIRCLE_DIAMETER / 2.0, IN_OUT_CIRCLE_DIAMETER / 2.0));
+            let interact_rect = egui::Rect::from_center_size(center, egui::vec2(IN_OUT_CIRCLE_DIAMETER / 2.0 + 2.0, IN_OUT_CIRCLE_DIAMETER / 2.0 + 2.0));
             if interact_rect.contains(ptr_pos) && res.clicked() {
                 event = Some(GateEvent::ClickedOut {
                     id: self.id,

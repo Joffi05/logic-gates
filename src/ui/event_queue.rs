@@ -36,10 +36,10 @@ pub enum CanvasEvent {
     // Für undo muss hier gate info rein
     RemoveSelected,
     AddConnection {
-        from_gate: Option<Rc<RefCell<Box<DrawableGate>>>>,
-        to_gate: Option<Rc<RefCell<Box<DrawableGate>>>>,
-        InputPos: Option<InOutPosition>,
-        OutputPos: Option<InOutPosition>,
+        from_gate: Rc<RefCell<Box<DrawableGate>>>,
+        to_gate: Rc<RefCell<Box<DrawableGate>>>,
+        InputPos: InOutPosition,
+        OutputPos: InOutPosition,
     },
     PanCanvas {
         from: (f32, f32),
@@ -51,6 +51,16 @@ pub enum CanvasEvent {
     },
     ClickedCanvas {
         pos: (f32, f32),
+    },
+    DoubleClickedCanvas {
+        pos: (f32, f32),
+    },
+    RightClickedCanvas {
+        pos: (f32, f32),
+    },
+    SplitterClicked {
+        pos: (f32, f32),
+        gate: Rc<RefCell<Box<DrawableGate>>>,
     },
     GateEvent(GateEvent),
 }
@@ -74,7 +84,16 @@ impl std::fmt::Debug for CanvasEvent {
                 write!(f, "ZoomCanvas: from {:?} to {:?}", from, to)
             },
             CanvasEvent::ClickedCanvas { pos } => {
-                write!(f, "UnselectAll")
+                write!(f, "ClickedCanvas")
+            },
+            CanvasEvent::DoubleClickedCanvas { pos } => {
+                write!(f, "DoubleClickedCanvas")
+            },
+            CanvasEvent::RightClickedCanvas { pos } => {
+                write!(f, "RightClickedCanvas")
+            },
+            CanvasEvent::SplitterClicked { pos, gate } => {
+                write!(f, "SplitterClicked")
             },
             CanvasEvent::GateEvent(event) => {
                 write!(f, "GateEvent: {:?}", event)
@@ -101,7 +120,7 @@ impl EventQueue {
         if self.mutate_last_if_same(&mut event) {
             // If the last event cannot be mutated, add the new event to the queue
             self.events.push(event);
-            println!("Length: {}", self.events.len());
+
             // Return true indicating that a new event was added
             return true;
         }

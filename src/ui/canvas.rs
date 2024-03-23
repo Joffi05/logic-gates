@@ -1,6 +1,6 @@
 use std::{cell::{Ref, RefCell}, rc::Rc};
 
-use egui_sdl2_gl::egui::{self as egui, Color32, InputState, Response};
+use egui_sdl2_gl::egui::{self as egui, Color32, InputState, Response, Stroke};
 use uuid::Uuid;
 use crate::{ui::drawable_gate::DrawableGate, Circuit, LogicGate};
 
@@ -18,6 +18,8 @@ pub struct Canvas {
     to_spawn: Option<GhostGate>,
     connections: Vec<DrawableConnection>,
     underlying_circuit: Circuit,
+    selected_input: Option<(InOutPosition, Uuid)>,
+    selected_output: Option<(InOutPosition, Uuid)>,
     events: EventQueue,
 }
 
@@ -30,6 +32,8 @@ impl Canvas {
             to_spawn: None,
             connections: vec![],
             underlying_circuit: Circuit::new(name.to_string()),
+            selected_input: None,
+            selected_output: None,
             events: EventQueue::new(),
         }
     }
@@ -46,10 +50,25 @@ impl Canvas {
         self.zoom
     }
 
+    pub fn get_gate_by_id(&self, id: &Uuid) -> Option<Rc<RefCell<Box<DrawableGate>>>> {
+        self.gates.iter().find(|gate| gate.borrow().id == *id).cloned()
+    }
+    
     pub fn add_gate(&mut self, gate: DrawableGate) {
         let gate_rc = Rc::new(RefCell::new(Box::new(gate)));
         let id = gate_rc.borrow().id.clone();
-        self.underlying_circuit.add_gate(gate_rc.borrow().gate.clone(), id);
+
+        let name = gate_rc.borrow().gate.borrow().get_name();
+        if name == "BUTTON" {
+            self.underlying_circuit.add_input(gate_rc.borrow().gate.clone());
+        }
+        else if name == "LAMP" {
+            self.underlying_circuit.add_output(gate_rc.borrow().gate.clone());
+        }
+        else {
+            self.underlying_circuit.add_gate(gate_rc.borrow().gate.clone(), id);
+        }
+
         self.gates.push(gate_rc.clone());
     }
 
@@ -60,10 +79,13 @@ impl Canvas {
             // If not, you'll need to determine these based on your logic
             let input_index = connection.in_num.clone(); // Default to 0 or determine based on your logic
             let output_index = connection.out_num.clone(); // Default to 0 or determine based on your logic
-    
+
+            // Get indexes of the input/output gates
+            let in_index = input_gate.borrow().outputs_pos.iter().position(|pos| pos.get() == output_index.get()).unwrap();
+            let out_index = output_gate.borrow().inputs_pos.iter().position(|pos| pos.get() == input_index.get()).unwrap();
+
             // Call the connect method on the underlying circuit with the gates and their indexes
-            self.underlying_circuit.connect(input_gate.borrow().gate.clone(), input_index.get() as usize, output_gate.borrow().gate.clone(), output_index.get() as usize);
-            println!("Underlying circuit: {:?}", self.get_conn_len());
+            self.underlying_circuit.connect(input_gate.borrow().gate.clone(), in_index, output_gate.borrow().gate.clone(), out_index);
         }
 
         // Add the DrawableConnection to the list of connections
@@ -118,6 +140,13 @@ impl Canvas {
 
             self.process_events(ctx);
 
+            let zoom = self.get_zoom();
+            let pan_offset = self.get_pan_offset();
+
+            for conn in self.connections.iter_mut() {
+                conn.update(zoom, pan_offset);
+            }
+
             self.draw(ctx, ui,&painter, response.rect);
         
         });
@@ -125,6 +154,7 @@ impl Canvas {
         for g in &mut self.gates {
             g.borrow().gate.borrow_mut().calculate().unwrap();
         }
+
         self.underlying_circuit.calculate().unwrap();
     }
 
@@ -143,8 +173,38 @@ impl Canvas {
                     }
                 );
             }
+
+            let mut dragged_gate = false;
+            let mut clicked_in_out = false;
+
+            // Assuming `is_gate_dragging` is a boolean field in your struct initialized to `false`
+            if let Some(ptr) = res.interact_pointer_pos() {
+                for g in self.gates.iter() {
+                    if let Some(event) = g.borrow_mut().get_events(res, ptr, self.pan_offset, self.zoom) {
+                        if let GateEvent::MovedGate { id, from, to, start } = &event {
+                            dragged_gate = true; // Indicate that a gate is being dragged
+                        }
+                        if let GateEvent::ClickedIn { num, id } = &event {
+                            clicked_in_out = true;
+                        }
+                        if let GateEvent::ClickedOut { num, id } = &event {
+                            clicked_in_out = true;
+                        }
+
+                        self.events.add_event(CanvasEvent::GateEvent(event));
+                    }
+                }
+            }
+
+            let mut doubley = false;
+            if res.double_clicked() {
+                doubley = true;
+                if let Some(ptr) = res.interact_pointer_pos() {
+                    self.events.add_event(CanvasEvent::DoubleClickedCanvas { pos: ptr.into() });
+                }
+            }
         
-            if res.clicked() {
+            if res.clicked() && !doubley {
                 if let Some(gate) = self.to_spawn.take() {
                     if let Some(ptr) = res.interact_pointer_pos() {
                         // TODO
@@ -197,28 +257,15 @@ impl Canvas {
                 }
                 else {
                     if let Some(ptr) = res.interact_pointer_pos() {
-                        self.events.add_event(CanvasEvent::ClickedCanvas { pos: (ptr.x, ptr.y) });
-                    }
-                }
-            }
-
-            let mut dragged_gate = false;
-
-            // Assuming `is_gate_dragging` is a boolean field in your struct initialized to `false`
-            if let Some(ptr) = res.interact_pointer_pos() {
-                for g in self.gates.iter() {
-                    if let Some(event) = g.borrow_mut().get_events(res, ptr, self.pan_offset, self.zoom) {
-                        if let GateEvent::MovedGate { id, from, to, start } = &event {
-                            dragged_gate = true; // Indicate that a gate is being dragged
+                        if !clicked_in_out {
+                            self.events.add_event(CanvasEvent::ClickedCanvas { pos: (ptr.x, ptr.y) });
                         }
-
-                        self.events.add_event(CanvasEvent::GateEvent(event));
                     }
                 }
             }
 
             if res.dragged() {
-                if !dragged_gate { // Only pan the canvas if no gate is being dragged
+                if !dragged_gate && (res.drag_delta().x.abs() > 0.01 || res.drag_delta().y.abs() > 0.01) { // Only pan the canvas if no gate is being dragged
                     self.events.add_event(
                         CanvasEvent::PanCanvas {
                             from: (self.pan_offset.x, self.pan_offset.y),
@@ -240,6 +287,50 @@ impl Canvas {
                 CanvasEvent::SpawnGate { gate, pos, size } => {
                     self.add_gate(DrawableGate::from_ghost(ctx, gate.clone(), *pos, *size));
                 }
+                CanvasEvent::AddConnection { from_gate, to_gate, InputPos, OutputPos } => {
+                    let connection = DrawableConnection::with_gates(
+                        from_gate.borrow().get_pos_of_in_out(OutputPos.clone(), self.zoom, self.pan_offset),
+                        to_gate.borrow().get_pos_of_in_out(InputPos.clone(), self.zoom, self.pan_offset),
+                        InputPos.clone(),
+                        OutputPos.clone(),
+                        Color32::WHITE,
+                        from_gate.clone(),
+                        to_gate.clone(),
+                        Uuid::new_v4()
+                    );
+
+                    self.add_connection(connection);
+                }
+                CanvasEvent::SplitterClicked { pos, gate } => {
+                    if let Some(sel_inp) = &self.selected_input {
+                        let connection = DrawableConnection::with_gates(
+                            gate.borrow().get_pos_of_in_out(sel_inp.0.clone(), self.zoom, self.pan_offset),
+                            (pos.0, pos.1),
+                            sel_inp.0.clone(),
+                            InOutPosition::new(0),
+                            Color32::WHITE,
+                            gate.clone(),
+                            gate.clone(),
+                            Uuid::new_v4()
+                        );
+
+                        self.add_connection(connection);
+                    }
+                    else if let Some(sel_out) = &self.selected_output {
+                        let connection = DrawableConnection::with_gates(
+                            (pos.0, pos.1),
+                            gate.borrow().get_pos_of_in_out(sel_out.0.clone(), self.zoom, self.pan_offset),
+                            InOutPosition::new(0),
+                            sel_out.0.clone(),
+                            Color32::WHITE,
+                            gate.clone(),
+                            gate.clone(),
+                            Uuid::new_v4()
+                        );
+
+                        self.add_connection(connection);
+                    }
+                }
                 CanvasEvent::RemoveSelected => {
                     self.remove_selected();
                 }
@@ -251,47 +342,60 @@ impl Canvas {
                 }
                 CanvasEvent::ClickedCanvas { pos } => {
                     self.unselect_all();
+                    self.selected_input = None;
+                    self.selected_output = None;
+                }
+                CanvasEvent::DoubleClickedCanvas { pos } => {
+                    
+                }
+                CanvasEvent::RightClickedCanvas { pos } => {
+                    // TODO
+                    // Implement context menu
                 }
                 CanvasEvent::GateEvent(event) => {
                     for g in self.gates.iter() {
                         match event {
                             GateEvent::ClickedOn { id } => {
-                                for g in self.gates.iter() {
-                                    let mut g_ref = g.borrow_mut();
-                                    if g_ref.id == *id {
-                                        println!("Clicked on gate: {:?}", g_ref.id);
-                                        g_ref.selected = true;
-                            
-                                        // Determine if the gate is a "BUTTON" while we have a borrow.
-                                        let is_button = g_ref.gate.borrow().get_name() == "BUTTON";
-                                        
-                                        // Drop the borrow on g_ref to avoid borrow conflicts later.
-                                        drop(g_ref); 
-                            
-                                        // Only proceed if the gate is a "BUTTON".
-                                        if is_button {
-                                            println!("Button clicked");
-                                            // Obtain a new borrow to modify the gate.
-                                            // Since g_ref has been dropped, this is a new, separate borrow.
-                                            let gate_ref = g.borrow_mut(); // Borrow the DrawableGate mutably again.
-                                            let mut gate_logic_ref = gate_ref.gate.borrow_mut(); // Borrow the inner logic gate mutably.
-                            
-                                            if let Some(memory) = gate_logic_ref.get_memory() {
-                                                println!("Memory before: {:?}", memory[0]);
-                                                gate_logic_ref.set_memory(0, !memory[0]);
-                                            }
+                                let mut g_ref = g.borrow_mut();
+                                if g_ref.id == *id {
+                                    g_ref.selected = true;
+                        
+                                    let is_button = g_ref.gate.borrow().get_name() == "BUTTON";
+                                    
+                                    drop(g_ref); 
+                        
+                                    if is_button {
+                                        let gate_ref = g.borrow_mut(); 
+                                        let mut gate_logic_ref = gate_ref.gate.borrow_mut(); 
+                        
+                                        if let Some(memory) = gate_logic_ref.get_memory() {
+                                            gate_logic_ref.set_memory(0, !memory[0]);
                                         }
                                     }
-                                }
+                                }  
                             },
                             GateEvent::ClickedIn { num, id } => {
                                 if g.borrow().id == *id {
-                                    event_to_add = Some(CanvasEvent::AddConnection { from_gate: None, to_gate: Some(g.clone()), InputPos: None, OutputPos: Some(num.clone()) });
+                                    if let Some((num_out, id_out)) = &self.selected_output.take() {
+                                        event_to_add = Some(CanvasEvent::AddConnection { from_gate: self.get_gate_by_id(id_out).unwrap(), to_gate: g.clone(), InputPos: num.clone(), OutputPos: num_out.clone() });
+                                    }
+                                    else {
+                                        self.selected_input = Some((num.clone(), id.clone()));
+                                    }
+                                    
+                                    if g.borrow().gate.borrow().get_name() == "SPLITTER" {
+                                        event_to_add = Some(CanvasEvent::SplitterClicked { pos: g.borrow().pos, gate: g.clone() });
+                                    }
                                 }
                             },
                             GateEvent::ClickedOut { num, id } => {
                                 if g.borrow().id == *id {
-                                    event_to_add = Some(CanvasEvent::AddConnection { from_gate: Some(g.clone()), to_gate: None, InputPos: Some(num.clone()), OutputPos: None });
+                                    if let Some((num_in, id_in)) = &self.selected_input.take() {
+                                        event_to_add = Some(CanvasEvent::AddConnection { from_gate: g.clone(), to_gate: self.get_gate_by_id(id_in).unwrap(), InputPos: num_in.clone(), OutputPos: num.clone() });
+                                    }
+                                    else {
+                                        self.selected_output = Some((num.clone(), id.clone()));
+                                    }
                                 }
                             },
                             GateEvent::MovedGate { id, from, to, start } => {
@@ -336,6 +440,28 @@ impl Canvas {
         self.draw_grid(painter, rect);
         for gate in &self.gates {
             gate.borrow_mut().draw(ctx, ui, painter, self.pan_offset, self.zoom);
+
+            if let Some(sel_in) = &self.selected_input {
+                if sel_in.1 == gate.borrow().id {
+                    // Draw a white circle around the selected input to signal that its selected
+                    let (x, y) = gate.borrow().get_pos_of_in_out(sel_in.0.clone(), self.zoom, self.pan_offset);
+                    let pos = egui::pos2(x, y);
+                    let radius = 10.0;
+                    let color = Color32::WHITE;
+                    painter.circle_stroke(pos, radius, Stroke::new(2.0, color));
+                }
+            }
+
+            if let Some(sel_out) = &self.selected_output {
+                if sel_out.1 == gate.borrow().id {
+                    // Draw a white circle around the selected output to signal that its selected
+                    let (x, y) = gate.borrow().get_pos_of_in_out(sel_out.0.clone(), self.zoom, self.pan_offset);
+                    let pos = egui::pos2(x, y);
+                    let radius = 10.0;
+                    let color = Color32::WHITE;
+                    painter.circle_stroke(pos, radius, Stroke::new(2.0, color));
+                }
+            }
         }
         for connection in &self.connections {
             connection.draw(painter, self.pan_offset, self.zoom);
@@ -357,12 +483,10 @@ impl Canvas {
 
     //             let gate_ref = gate.borrow();
     //             if let Some((pos, index, id)) = &gate_ref.in_clicked_at {
-    //                 println!("In clicked at: {:?}", pos.0);
     //                 clicked_in = Some(((pos.0, pos.1), gate.clone(), index.clone()));
     //                 gates_to_reset.push(gate.clone());
     //             }
     //             if let Some((pos, index, id)) = &gate_ref.out_clicked_at {
-    //                 println!("Out clicked at: {:?}", pos.0);
     //                 clicked_out = Some(((pos.0, pos.1), gate.clone(), index.clone()));
     //                 gates_to_reset.push(gate.clone());
     //             }

@@ -9,7 +9,7 @@ INPUT_POSITIONS = {8, 10}
 OUTPUT_POSITIONS = {4}
 
 function Calculate(inputs)
-    local result = true
+    local result = false
     for i, input in ipairs(inputs) do
         result = result or input
     end

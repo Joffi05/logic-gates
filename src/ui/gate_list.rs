@@ -96,10 +96,10 @@ impl GateList {
                             let gate_name = file_name.split(".").next().unwrap().to_ascii_uppercase();
 
                             let gate = GhostGate {
-                                    gate: Rc::new(RefCell::new(Box::new(BasicGate::from_lua(gate_name, gate_file.lua.clone()).unwrap()))),
-                                    files: gate_file,
-                                    inputs_pos: ins,
-                                    outputs_pos: outs,
+                                gate: Rc::new(RefCell::new(Box::new(BasicGate::from_lua(gate_name, gate_file.lua.clone()).unwrap()))),
+                                files: gate_file,
+                                inputs_pos: ins,
+                                outputs_pos: outs,
                             };
 
                             // Add if not already in
