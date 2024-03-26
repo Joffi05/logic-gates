@@ -5,3 +5,6 @@ lua.lib
 lua54.dll
 SDL2.dll
 SDL2.lib
+perf.data
+perf.data.old
+dhat-heap.json
