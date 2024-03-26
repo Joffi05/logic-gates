@@ -139,7 +139,7 @@ impl LogicGate for CircuitBus {
 // Structure that holds many gates and can be compiled to a new gate
 pub struct Circuit {
     name: String,
-    gates: Vec<(Rc<RefCell<Box<dyn LogicGate>>>, Uuid)>,
+    pub gates: Vec<(Rc<RefCell<Box<dyn LogicGate>>>, Uuid)>,
     connections: Vec<Connection>,
     circuit_inputs: Vec<Rc<RefCell<Box<dyn LogicGate>>>>,
     circuit_outputs: Vec<Rc<RefCell<Box<dyn LogicGate>>>>,
@@ -544,7 +544,7 @@ pub trait LogicGate {
     fn get_memory(&self) -> Option<Vec<bool>> {
         None
     }
-    fn get_lua_env(&mut self) -> Option<&mut Lua> {
+    fn get_lua_env(&mut self) -> Option<(&mut Lua, &LuaCode)> {
         None
     }
 }
@@ -604,10 +604,10 @@ impl LogicGate for BasicGate {
         Some(self.gate.get_memory())
     }
 
-    fn get_lua_env(&mut self) -> Option<&mut Lua> {
+    fn get_lua_env(&mut self) -> Option<(&mut Lua, &LuaCode)> {
         match &mut self.calc_mode {
-            CalcMode::Lua(_code, lua) => {
-                Some(lua)
+            CalcMode::Lua(code, lua) => {
+                Some((lua, code))
             },
             CalcMode::TruthTable(_tt) => {
                 None

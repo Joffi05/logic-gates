@@ -19,5 +19,5 @@ end
 
 -- Blue
 function Draw(buffer)
-    buffer:set_all(0,0,255, 255)
+    buffer:set_all(0,0,255,255)
 end

@@ -1,7 +1,9 @@
 
-use std::{cell::RefCell, error::Error, hash::Hash, path::Path, rc::Rc};
+use std::{cell::RefCell, error::Error, hash::Hash, path::Path};
+use std::rc::Rc;
 use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, Rect, TextureHandle, TextureOptions}};
 use mlua::{Debug, Function, Lua, UserData, UserDataMethods};
+use sdl2::libc::sock_extended_err;
 use serde::de::value::UsizeDeserializer;
 use crate::LogicGate;
 use super::{canvas::GRID_SPACING, drawable_connection::DrawableConnection, event_queue::GateEvent, gate_list::GhostGate};
@@ -108,21 +110,31 @@ impl GateFiles {
 }
 
 struct VisualBuffer {
-    pub buffer: Vec<[u8; 4]>,
     pub size: (u32, u32),
     pub texture: TextureHandle,
     pub changed: bool,
+    pub buffer: Vec<[u8; 4]>,
 }
 
 impl UserData for &mut VisualBuffer {
     fn add_methods<'lua, M: UserDataMethods<'lua, Self>>(methods: &mut M) {
-        methods.add_method("get_size", |_, this, _: ()| Ok(this.size));
+        methods.add_method("get_width", |_, this, _: ()| Ok(this.size.0));
+        methods.add_method("get_height", |_, this, _: ()| Ok(this.size.1));
         methods.add_method("get_pixel", |_, this, (x, y): (u32, u32)| Ok(this.buffer[(y * this.size.0 + x) as usize]));
         methods.add_method_mut("set_pixel", |_, this, (x, y, color): (u32, u32, (u8, u8, u8, u8))| {
             let index = (y * this.size.0 + x) as usize;
             if index < this.buffer.len() {
                 this.buffer[index] = (color.0, color.1, color.2, color.3).into();
             }
+            this.changed = true;
+            Ok(())
+        });
+        methods.add_method_mut("set_all", |_, this, color: (u8, u8, u8, u8)| {
+            println!("Buffer Length: {}", this.buffer.len());
+            println!("Width: {}", this.size.0);
+            println!("Height: {}", this.size.1);
+
+            this.buffer.iter_mut().for_each(|i| *i = (color.0, color.1, color.2, color.3).into());
             this.changed = true;
             Ok(())
         });
@@ -134,13 +146,6 @@ impl UserData for &mut VisualBuffer {
                         this.buffer[index] = (color.0, color.1, color.2, color.3).into();
                     }
                 }
-            }
-            this.changed = true;
-            Ok(())
-        });
-        methods.add_method_mut("set_all", |_, this, color: (u8, u8, u8, u8)| {
-            for i in 0..this.buffer.len() {
-                this.buffer[i] = [color.0, color.1, color.2, color.3];
             }
             this.changed = true;
             Ok(())
@@ -163,7 +168,7 @@ impl VisualBuffer {
             size: [width, height],
             pixels,
         };
-
+        
         self.texture.set(img, TextureOptions::default());
     }
 }
@@ -330,22 +335,24 @@ impl DrawableGate {
     }
 
     pub fn call_lua_update_buffer(&mut self) -> mlua::Result<()> {
-        // Bind the borrow to a local variable to extend its lifetime
         let mut gate_ref = self.gate.borrow_mut();
-
-        // Now use gate_ref to get the Lua environment
+    
         let lua = gate_ref.get_lua_env().ok_or_else(|| mlua::Error::RuntimeError("Failed to get Lua environment".to_string()))?;
 
-        lua.scope(|scope| {
+        lua.0.scope(|scope| {
             let visual_buff_ref = scope.create_nonstatic_userdata(&mut self.visual)?;
-
-            let draw_func: Function = lua.globals().get("Draw")?; // Assuming your Lua function is named "Draw"
-
-            draw_func.call::<_, ()>((visual_buff_ref,))?;
+            let globals = lua.0.globals();
+            let draw_func: mlua::Function = globals.get("Draw")?;
+            draw_func.call(visual_buff_ref)?;
 
             Ok(())
-        })
+        })?;
+
+        lua.0.gc_collect()?;
+
+        Ok(())
     }
+    
     
     pub fn get_events(&self, res: &egui::Response, ptr_pos: egui::Pos2, pan_offset: egui::Vec2, zoom_level: f32) -> Option<GateEvent> {
         let gate_rect = self.get_rect(zoom_level, pan_offset);
@@ -397,9 +404,9 @@ impl DrawableGate {
 
     pub fn draw(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, pan_offset: egui::Vec2, zoom_level: f32) {
         let gate_rect = self.get_rect(zoom_level, pan_offset);
-    
+        
         self.call_lua_update_buffer().unwrap();
-    
+        
         self.draw_texture(painter, gate_rect, ctx, zoom_level);
     
         // Draw inputs

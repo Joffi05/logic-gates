@@ -1,5 +1,4 @@
 use std::{cell::{Ref, RefCell}, rc::Rc};
-
 use egui_sdl2_gl::egui::{self as egui, Color32, InputState, Response, Stroke};
 use uuid::Uuid;
 use crate::{ui::drawable_gate::DrawableGate, Circuit, LogicGate};
@@ -150,10 +149,6 @@ impl Canvas {
             self.draw(ctx, ui,&painter, response.rect);
         
         });
-
-        for g in &mut self.gates {
-            g.borrow().gate.borrow_mut().calculate().unwrap();
-        }
 
         self.underlying_circuit.calculate().unwrap();
     }
@@ -439,6 +434,10 @@ impl Canvas {
     fn draw(&mut self, ctx: &egui::Context, ui: &mut egui::Ui, painter: &egui::Painter, rect: egui::Rect) {
         self.draw_grid(painter, rect);
         for gate in &self.gates {
+            if let Some(lua) = gate.borrow().gate.borrow_mut().get_lua_env() {
+                lua.0.load(&lua.1.0).exec().unwrap();
+            }
+            
             gate.borrow_mut().draw(ctx, ui, painter, self.pan_offset, self.zoom);
 
             if let Some(sel_in) = &self.selected_input {

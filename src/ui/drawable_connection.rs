@@ -1,5 +1,5 @@
-use std::{cell::RefCell, rc::Rc};
-
+use std::{cell::RefCell};
+use std::rc::Rc;
 use egui_sdl2_gl::egui::{self as egui, Color32};
 
 use super::drawable_gate::{DrawableGate, InOutPosition};

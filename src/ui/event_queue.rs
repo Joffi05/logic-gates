@@ -1,6 +1,6 @@
 use core::fmt;
-use std::{cell::RefCell, fmt::Formatter, rc::Rc};
-
+use std::{cell::RefCell, fmt::Formatter};
+use std::rc::Rc;
 use uuid::Uuid;
 
 use super::{drawable_gate::{DrawableGate, InOutPosition}, gate_list::GhostGate};
@@ -120,6 +120,11 @@ impl EventQueue {
         if self.mutate_last_if_same(&mut event) {
             // If the last event cannot be mutated, add the new event to the queue
             self.events.push(event);
+
+            // Remove the last events until the queue is 100 long
+            while self.events.len() > 50 {
+                self.events.remove(0);
+            }
 
             // Return true indicating that a new event was added
             return true;
