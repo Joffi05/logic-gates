@@ -16,6 +16,28 @@ pub use new_logic_gates::Circuit;
 pub use new_logic_gates::TruthTable;
 pub use new_logic_gates::CantCompileGate;
 
+
+#[cfg(not(target_env = "msvc"))]
+use jemallocator::Jemalloc;
+
+#[cfg(not(target_env = "msvc"))]
+#[global_allocator]
+static GLOBAL: Jemalloc = Jemalloc;
+
+use libc::{c_char, c_void};
+use std::ptr::{null, null_mut};
+extern "C" fn write_cb(_: *mut c_void, message: *const c_char) {
+    print!("{}", String::from_utf8_lossy(unsafe {
+        std::ffi::CStr::from_ptr(message as *const i8).to_bytes()
+    }));
+}
+
+fn mem_print() {
+    unsafe { jemalloc_sys::malloc_stats_print(Some(write_cb), null_mut(), null()) }
+}
+
+
+
 const SCREEN_WIDTH: u32 = 800;
 const SCREEN_HEIGHT: u32 = 600;
 
@@ -125,4 +147,5 @@ fn main() {
             }
         }
     }
+    mem_print();
 }

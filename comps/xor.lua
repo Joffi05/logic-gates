@@ -9,7 +9,6 @@ INPUT_POSITIONS = {8, 10}
 OUTPUT_POSITIONS = {4}
 
 function Calculate(inputs)
-    -- XOR
     local result = false
     for i, input in ipairs(inputs) do
         result = result ~= input
@@ -20,5 +19,5 @@ end
 
 -- Blue
 function Draw(buffer)
-    buffer:set_all(0,0,255, 255)
+    buffer:set_all(0,0,200,255)
 end

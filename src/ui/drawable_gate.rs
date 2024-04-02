@@ -1,6 +1,5 @@
 
-use std::{cell::RefCell, error::Error, hash::Hash, path::Path};
-use std::rc::Rc;
+use std::{cell::RefCell, error::Error, hash::Hash, path::Path, rc::Rc};
 use egui_sdl2_gl::{egui::{self as egui, pos2, Color32, Rect, TextureHandle, TextureOptions}};
 use mlua::{Debug, Function, Lua, UserData, UserDataMethods};
 use sdl2::libc::sock_extended_err;
@@ -80,6 +79,13 @@ pub struct GateProps {
 }
 
 impl GateFiles {
+    pub fn new(lua: Box<Path>, json: Option<Box<Path>>) -> Self {
+        Self {
+            lua,
+            json,
+        }
+    }
+
     pub fn read_props(&self) -> Result<GateProps, Box<dyn Error>> {
         // Read the lua file and get the defined properties
         let lua = Lua::new();
@@ -153,9 +159,8 @@ impl UserData for &mut VisualBuffer {
     }
 }
 
-
 impl VisualBuffer {
-    pub fn make_texture(&mut self) {
+    pub fn make_texture(&mut self, ctx: &egui::Context) {
         let width = self.size.0 as usize;
         let height = self.size.1 as usize;
         
@@ -164,12 +169,17 @@ impl VisualBuffer {
             egui::Color32::from_rgba_unmultiplied(color[0], color[1], color[2], color[3])
         }).collect();
 
+        if width * height != pixels.len() {
+            panic!("Buffer size does not match the size of the image");
+        }
+
         let img = egui::ColorImage {
             size: [width, height],
             pixels,
         };
-        
-        self.texture.set(img, TextureOptions::default());
+
+        //println!("{}", self.texture.byte_size());
+        self.texture = ctx.load_texture(format!("gate_texture"), img, TextureOptions::default());
     }
 }
 
@@ -237,6 +247,7 @@ impl DrawableGate {
             lua: lua.into_boxed_path(),
             json: if json.exists() { Some(json.into_boxed_path()) } else { None },
         };
+
 
         let visual = VisualBuffer {
             buffer: pixels,
@@ -316,13 +327,16 @@ impl DrawableGate {
         self.selected = selected;
     }
 
-    fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, _ctx: &egui::Context, zoom_level: f32) {
+    fn draw_texture(&mut self, painter: &egui::Painter, gate_rect: egui::Rect, ctx: &egui::Context, zoom_level: f32) {
+        // FIXME nicht gut, frisst viel ram
+        ctx.forget_all_images();
+
         // Update texture if Buffer changed
         if self.visual.changed {
-            self.visual.make_texture();
+            self.visual.make_texture(ctx);
         }
 
-        // draw texture
+        // Draw texture
         painter.image(self.visual.texture.id(), gate_rect, Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),  Color32::WHITE);
 
         // Draw stroke around the gate if it's selected
